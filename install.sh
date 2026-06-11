@@ -80,7 +80,7 @@ if [ $NEED_CUDA -eq 1 ]; then
     
     # Download with progress
     echo "   Downloading CUDA installer..."
-    wget --progress=bar:force "https://developer.download.nvidia.com/compute/cuda/${REQUIRED_CUDA}/local_installers/cuda_${REQUIRED_CUDA}_*_linux.run" -O /tmp/cuda.run 2>&1
+    wget --show-progress --progress=bar:force "https://developer.download.nvidia.com/compute/cuda/${REQUIRED_CUDA}/local_installers/cuda_${REQUIRED_CUDA}_*_linux.run" -O /tmp/cuda.run 2>&1
     
     echo "   Running CUDA installer..."
     sudo sh /tmp/cuda.run --toolkit --silent --override
