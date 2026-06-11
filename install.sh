@@ -25,20 +25,13 @@ fi
 echo -e "${GREEN}✅ CUDA detected:${NC}"
 nvidia-smi --query-gpu=name,driver_version --format=csv,noheader | head -1
 
-# 3. Install using a dedicated virtual environment (bypasses system Python restrictions)
+# 3. Create a virtual environment (bypasses system Python restrictions)
 VENV_DIR="$HOME/.local/share/llama-light-venv"
-if [ -d "$VENV_DIR" ]; then
-    echo "📦 Found existing virtual environment, updating..."
-    source "$VENV_DIR/bin/activate"
-    pip install --upgrade pip
-    pip install --upgrade git+https://github.com/walimo/llama-Light.git
-else
-    echo "📦 Creating virtual environment in $VENV_DIR ..."
-    python3 -m venv "$VENV_DIR"
-    source "$VENV_DIR/bin/activate"
-    pip install --upgrade pip
-    pip install git+https://github.com/walimo/llama-Light.git
-fi
+echo "📦 Setting up isolated Python environment in $VENV_DIR ..."
+python3 -m venv --clear "$VENV_DIR"
+source "$VENV_DIR/bin/activate"
+pip install --upgrade pip
+pip install git+https://github.com/walimo/llama-Light.git
 
 # 4. Symlink the binary to ~/.local/bin
 mkdir -p "$HOME/.local/bin"
