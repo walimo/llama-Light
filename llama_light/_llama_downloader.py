@@ -207,3 +207,28 @@ def ensure_binaries(version: str) -> Tuple[Optional[str], Optional[str]]:
 
     print("❌ Could not obtain a CUDA binary. Please ensure CUDA Toolkit is installed or try a different version.")
     return None, None
+
+def check_version(version: str) -> str:
+    """Check if cached binaries match the required version."""
+    cache_dir = cache_bin_dir(version)
+    version_file = os.path.join(cache_dir, ".version")
+    if os.path.exists(version_file):
+        try:
+            with open(version_file) as f:
+                cached_version = f.read().strip()
+            if cached_version == version:
+                return "up_to_date"
+            else:
+                return "outdated"
+        except:
+            pass
+    return "missing"
+
+def upgrade() -> bool:
+    """Upgrade to the latest version of binaries."""
+    from .__init__ import LLAMA_CPP_VERSION
+    cache_dir = cache_bin_dir(LLAMA_CPP_VERSION)
+    import shutil
+    shutil.rmtree(cache_dir, ignore_errors=True)
+    _, server = ensure_binaries(LLAMA_CPP_VERSION)
+    return server is not None
