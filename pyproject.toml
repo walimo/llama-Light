@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llama-light"
+version = "0.2.0"
+description = "Lightweight llama.cpp wrapper — Ollama-style CLI"
+requires-python = ">=3.8"
+dependencies = [
+    "tqdm>=4.66.0",
+    "huggingface_hub>=0.19.0",
+]
+
+[project.scripts]
+llama = "llama_light._cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llama_light*"]
