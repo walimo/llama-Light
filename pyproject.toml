@@ -7,14 +7,87 @@ name = "llama-light"
 version = "0.2.0"
 description = "Lightweight llama.cpp wrapper — Ollama-style CLI"
 requires-python = ">=3.8"
+authors = [
+    {name = "walimo", email = "walimo@example.com"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+keywords = ["llama", "llama.cpp", "cli", "gpu", "cuda"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System",
+    "Topic :: Utilities",
+]
 dependencies = [
     "tqdm>=4.66.0",
     "huggingface_hub>=0.19.0",
+    "packaging>=21.0",  # For version comparison (added for robustness)
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "isort>=5.12",
+    "mypy>=1.0",
+    "ruff>=0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/walimo/llama-Light"
+Repository = "https://github.com/walimo/llama-Light.git"
+Issues = "https://github.com/walimo/llama-Light/issues"
+Documentation = "https://github.com/walimo/llama-Light#readme"
 
 [project.scripts]
 llama = "llama_light._cli:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["llama_light*"]
+[tool.setuptools]
+packages = ["llama_light"]
+
+[tool.setuptools.package-data]
+llama_light = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_gitignore = true
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes
+    "I",    # isort
+    "C",    # flake8-comprehensions
+    "B",    # flake8-bugbear
+]
+ignore = [
+    "E501",  # Line too long (handled by black)
+]
