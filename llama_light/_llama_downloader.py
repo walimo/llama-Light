@@ -147,7 +147,7 @@ def detect_cuda_version() -> Optional[str]:
             ["nvcc", "--version"],
             capture_output=True, text=True, timeout=5
         )
-        for line in r.stdout.splitlines():
+        for line in r.stdout.read().splitlines():
             if "release" in line.lower():
                 match = re.search(r'release (\d+\.\d+)', line)
                 if match:
@@ -275,7 +275,7 @@ def run_with_progress(cmd, cwd: str, description: str, timeout: Optional[int] = 
             print_error(f"{description} failed (exit code {process.returncode})")
             # Show last few lines of output for debugging
             if process.stdout:
-                lines = process.stdout.splitlines()[-3:]
+                lines = process.stdout.read().splitlines()[-3:]
                 for line in lines:
                     print(f"     {line}")
             return False
