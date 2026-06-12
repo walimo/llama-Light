@@ -6,11 +6,9 @@ All paths live under ``~/.config/llama_light`` and ``~/.cache/llama_light``.
 Config files are auto-created on first run with hardware-aware defaults.
 """
 
-import datetime
 import json
 import os
 import platform
-import re
 import shutil
 import subprocess
 from typing import Any, Dict, Optional

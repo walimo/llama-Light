@@ -498,18 +498,6 @@ def cmd_config_restore(args):
     print("[restore] complete — restart server to apply")
 
 
-def cmd_config_list_backups(args):
-    backups = list_backups()
-    if not backups:
-        print("No backups found.")
-        return
-    print(f"{'PATH':<60} {'SIZE':>8} {'MODIFIED':>14}")
-    print("-" * 90)
-    for path, size, mtime in backups:
-        from datetime import datetime
-        dt = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-        print(f"{path:<60} {size:>7.1f}KB {dt:>14}")
-
 
 def cmd_webui(args):
     """Open llama.cpp's built-in web UI in browser."""
@@ -605,119 +593,6 @@ def _resolve_gen_args(args) -> dict:
         "frequency_penalty":   _resolve("frequency_penalty", args.frequency_penalty, model_cfg.get("frequency_penalty"), 0.0),
         "presence_penalty":    _resolve("presence_penalty", args.presence_penalty, model_cfg.get("presence_penalty"), 0.0),
     }
-
-
-# ── Parser ────────────────────────────────────────────────────────────────────
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="llama",
-        description="llama-Light — Ollama-style llama.cpp wrapper",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    # start / restart
-    for cmd, help_str, fn in [
-        ("start",   "Start llama-server daemon", cmd_start),
-        ("restart", "Stop then start",           cmd_restart),
-    ]:
-        p = sub.add_parser(cmd, help=help_str)
-        _server_args(p)
-        p.set_defaults(func=fn)
-
-    # stop / kill
-    sub.add_parser("stop", help="Stop (SIGTERM)").set_defaults(func=cmd_stop)
-    sub.add_parser("kill", help="Kill  (SIGKILL)").set_defaults(func=cmd_kill)
-
-    # run — single-shot prompt
-    p = sub.add_parser("run", help="One-shot prompt")
-    _server_args(p)
-    _gen_args(p)
-    p.add_argument("--prompt", required=True)
-    p.set_defaults(func=cmd_run)
-
-    # chat — interactive loop
-    p = sub.add_parser("chat", help="Interactive chat loop")
-    _server_args(p)
-    _gen_args(p)
-    p.set_defaults(func=cmd_chat)
-
-  # hermes — NousResearch Hermes persona
-    #   llama hermes              → launch Hermes TUI (error if not installed)
-    #   llama hermes --prompt     → single-shot reply
-    p = sub.add_parser(
-        "hermes",
-        help="Launch Hermes TUI wired to local model (error if not installed)",
-    )
-    _server_args(p)
-    _gen_args(p)
-    p.add_argument("--prompt", default=None, help="Single-shot prompt")
-    p.set_defaults(func=cmd_hermes)
-
-    # hermes-desktop — launch the Hermes Electron desktop app
-    p = sub.add_parser(
-        "hermes-desktop",
-        help="Launch the Hermes Electron desktop app (error if not installed)",
-    )
-    _server_args(p)
-    p.set_defaults(func=cmd_hermes_desktop)
-
-    # claude — real Claude Code CLI wired to local model
-    p = sub.add_parser(
-        "claude",
-        help="Launch Claude Code CLI with local model (error if 'claude' not in PATH)",
-    )
-    _server_args(p)
-    _gen_args(p)
-    p.add_argument("--prompt", default=None, help="Single-shot prompt")
-    p.set_defaults(func=cmd_claude)
-
-    # pull / ls / rm
-    p = sub.add_parser("pull", help="Download a GGUF from Hugging Face")
-    p.add_argument("--repo",     required=True)
-    p.add_argument("--file",     required=True)
-    p.add_argument("--model-id", default=None, dest="model_id")
-    p.set_defaults(func=cmd_pull)
-
-    sub.add_parser("ls", help="List downloaded models").set_defaults(func=cmd_ls)
-
-    p = sub.add_parser("rm", help="Remove a model")
-    p.add_argument("model_id")
-    p.add_argument("--file", default=None)
-    p.set_defaults(func=cmd_rm)
-
-    # server info
-    sub.add_parser("ps",     help="Show running server table").set_defaults(func=cmd_ps)
-    sub.add_parser("status", help="Show server status").set_defaults(func=cmd_status)
-
-    p = sub.add_parser("logs", help="Tail server log")
-    p.add_argument("--lines", "-n", type=int, default=40)
-    p.set_defaults(func=cmd_logs)
-
-    sub.add_parser("version").set_defaults(func=cmd_version)
-    sub.add_parser("info",    help="Show llama-Light environment info").set_defaults(func=cmd_info)
-
-    # webui
-    sub.add_parser("webui", help="Open llama.cpp web UI in browser").set_defaults(func=cmd_webui)
-
-    # config
-    p_cfg = sub.add_parser("config", help="Get/set configuration")
-    cfg_sub = p_cfg.add_subparsers(dest="config_cmd", required=True)
-    cfg_sub.add_parser("show").set_defaults(func=cmd_config_show)
-    cfg_sub.add_parser("backup").set_defaults(func=cmd_config_backup)
-    p_restore = cfg_sub.add_parser("restore")
-    p_restore.add_argument("--latest", action="store_true", default=False,
-        help="Restore the latest backup (default)")
-    p_restore.add_argument("--path", default=None,
-        help="Explicit backup path to restore")
-    p_restore.set_defaults(func=cmd_config_restore)
-    cfg_sub.add_parser("list-backups").set_defaults(func=cmd_config_list_backups)
-    p_set = cfg_sub.add_parser("set")
-    p_set.add_argument("key")
-    p_set.add_argument("value")
-    p_set.add_argument("--model", default=None,
-        help="Per-model config (creates/updates per-model settings)")
-    p_set.set_defaults(func=cmd_config_set)
 
 
 

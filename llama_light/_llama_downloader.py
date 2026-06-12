@@ -276,7 +276,7 @@ def run_with_progress(cmd, cwd: str, description: str, timeout: Optional[int] = 
         else:
             print_error(f"{description} failed (exit code {process.returncode})")
             # Show last few lines of output for debugging
-            for line in output_lines[-3:]:
+            for line in output_lines[-40:]:
                 print(f"     {line}")
             return False
     
@@ -362,7 +362,7 @@ def build_from_source(version: str, cache_dir: str, compute_cap: str) -> bool:
         # ── CMake configuration ───────────────────────────────────────────
         if not run_with_progress(
             ["cmake", "..", "-DGGML_CUDA=ON",
-             f"-DCMAKE_CUDA_ARCHITECTURES={sm}",
+             f"-DCMAKE_CUDA_ARCHITECTURES={sm}" if sm != "120" else "-DGGML_NATIVE=ON",
              "-DCMAKE_BUILD_TYPE=Release"],
             build_dir,
             "CMake configuration"
