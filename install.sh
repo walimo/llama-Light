@@ -105,8 +105,8 @@ echo -e "\n${BLUE}[3/7]${NC} Matching Compute Target Matrix..."
 CAP_MAJOR=$(echo "$COMPUTE_CAP" | cut -d. -f1)
 
 if [ "$CAP_MAJOR" -ge 12 ]; then
-    CUDA_VERSION="12.8"
-    CUDA_ARCH="120"      # Blackwell SM12.0 native profile
+    CUDA_VERSION="13.3"
+    CUDA_ARCH="120a"      # Blackwell SM12.0 native profile
 elif [ "$CAP_MAJOR" -ge 11 ]; then
     CUDA_VERSION="12.4"
     CUDA_ARCH="110"
@@ -195,13 +195,9 @@ source "$VENV_DIR/bin/activate"
 # Install the package from current directory (no global npm modifications)
 pip install --upgrade pip -q
 pip install . -q || die "'pip install .' failed"
-    for c in hermes claude; do [ -f "$VENV_DIR/bin/$c" ] || { printf '#!/bin/bash\nexec llama "${0##*/}" "$@"
-' > "$VENV_DIR/bin/$c" && chmod +x "$VENV_DIR/bin/$c"; }; done
 
 mkdir -p "$HOME/.local/bin"
 ln -sf "$VENV_DIR/bin/llama" "$HOME/.local/bin/llama"
-ln -sf "$VENV_DIR/bin/hermes" "$HOME/.local/bin/hermes"
-ln -sf "$VENV_DIR/bin/claude" "$HOME/.local/bin/claude"
 deactivate
 echo -e "  ${GREEN}✓${NC} Core package modules compiled into sandbox"
 
