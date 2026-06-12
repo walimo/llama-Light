@@ -195,6 +195,8 @@ source "$VENV_DIR/bin/activate"
 # Install the package from current directory (no global npm modifications)
 pip install --upgrade pip -q
 pip install . -q || die "'pip install .' failed"
+    for c in hermes claude; do [ -f "$VENV_DIR/bin/$c" ] || { printf '#!/bin/bash\nexec llama "${0##*/}" "$@"
+' > "$VENV_DIR/bin/$c" && chmod +x "$VENV_DIR/bin/$c"; }; done
 
 mkdir -p "$HOME/.local/bin"
 ln -sf "$VENV_DIR/bin/llama" "$HOME/.local/bin/llama"
