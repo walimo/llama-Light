@@ -175,6 +175,8 @@ pip install git+https://github.com/walimo/llama-Light.git -q
 
 mkdir -p "$HOME/.local/bin"
 ln -sf "$VENV_DIR/bin/llama" "$HOME/.local/bin/llama"
+ln -sf "$VENV_DIR/bin/hermes" "$HOME/.local/bin/hermes"
+ln -sf "$VENV_DIR/bin/claude" "$HOME/.local/bin/claude"
 deactivate
 echo -e "  ${GREEN}✓${NC} Core package modules compiled into sandbox"
 
