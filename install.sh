@@ -86,7 +86,7 @@ echo -e "  ${GREEN}✓${NC} llama-light installed"
 echo -e "\n${BLUE}[7/7]${NC} Building CUDA kernels..."
 export PATH="$HOME/.local/bin:$PATH"
 export CMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH"
-llama setup 2>&1 | while IFS= read -r line; do echo "  ${CYAN}➜${NC} $line"; done
+llama setup 2>&1 | while IFS= read -r line; do echo -e "  ${CYAN}➜${NC} $line"; done
 
 echo -e "\n${GREEN}✅ Installation complete!${NC}"
 echo "Run: llama config set default_model <your-model.gguf>"
