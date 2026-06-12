@@ -29,7 +29,7 @@ _FLOAT_KEYS = {"min_p", "temperature", "top_p", "frequency_penalty",
                "yarn_ext_factor", "yarn_attn_factor", "yarn_beta_slow", "yarn_beta_fast"}
 # Keys that must be bool when set
 _BOOL_KEYS = {"mlock", "mmap", "direct_io", "no_host", "kv_offload",
-              "repack", "swa_full", "perf", "escape", "cpu_moe"}
+              "repack", "swa_full", "perf", "escape", "cpu_moe", "tool_calling"}
 # Keys where "none" is a valid string (not a null sentinel)
 _STRING_NONE_KEYS = {
     "reasoning_format", "flash_attn", "split_mode", "numa",
@@ -39,6 +39,7 @@ _STRING_NONE_KEYS = {
 _VALID_KEYS = set(_INT_KEYS) | set(_FLOAT_KEYS) | set(_BOOL_KEYS) | _STRING_NONE_KEYS | {
     "host", "port", "default_model", "last_model", "device", "numa",
     "override_tensor", "ui_mcp_proxy", "tools",
+    "reasoning", "active_profile", "tool_calling",
 }
 
 
@@ -124,25 +125,14 @@ def get_gpu_vram_gb() -> Optional[float]:
 
 def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
     """Hardware-aware defaults — dynamically sized for your GPU/CPU."""
-    gpu      = detect_gpu()
+    gpu       = detect_gpu()
     cpu_cores = os.cpu_count() or 4
-    vram     = get_gpu_vram_gb()
 
-    # ── Defaults ────────────────────────────────────────────────────────
-    ctx      = 4096
-    cache_type = "q4_0"
-
-    # ── Threads — don't oversubscribe ───────────────────────────────────
-    # 1 thread per physical core is usually optimal; cap at 16 for very
-    # high-core CPUs where hyperthreading gives diminishing returns.
+    # Threads — don't oversubscribe; 1 thread per physical core, cap at 16
     if cpu_cores <= 4:
         threads = cpu_cores
     else:
         threads = min(cpu_cores, 16)
-
-    # ── Defaults ────────────────────────────────────────────────────────
-    batch_size = 2048
-    ubatch_size = 512
 
     return {
         # Server
@@ -152,9 +142,9 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "default_model":    None,
         "last_model":       None,
         # Context / batching
-        "ctx":              ctx,
-        "batch_size":       batch_size,
-        "ubatch_size":      ubatch_size,
+        "ctx":              4096,
+        "batch_size":       512,
+        "ubatch_size":      512,
         "parallel":         1,
         # GPU
         "ngl":              99 if gpu != "cpu" else 0,
@@ -163,16 +153,16 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "kv_offload":       True,
         "repack":           True,
         # Attention / KV
-        "flash_attn":       "auto",
-        "cache_type_k":     cache_type,
-        "cache_type_v":     cache_type,
+        "flash_attn":       "on",
+        "cache_type_k":     "q4_0",
+        "cache_type_v":     "q4_0",
         # Threading
         "threads":          threads,
         "threads_batch":    threads,
         # Generation
-        "temperature":      0.7,
-        "top_k":            40,
-        "max_tokens":       2048,
+        "temperature":      0.6,
+        "top_k":            20,
+        "max_tokens":       4096,
         "predict":          -1,
         "keep":             0,
         # Memory
@@ -209,6 +199,8 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "reasoning_budget": 0,
         # Profile
         "active_profile":   "default",
+        # Tool calling
+        "tool_calling":     True,
     }
 
 
