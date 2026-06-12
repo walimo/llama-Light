@@ -439,6 +439,129 @@ class ProgressTracker:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Prebuilt Binary Fallback (CPU-only, last resort)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def download_prebuilt_binary(version: str, compute_cap: str, cache_dir: str) -> Optional[str]:
+    """Download a prebuilt CPU-only llama-server binary as a last-resort fallback.
+
+    llama.cpp's official GitHub releases do not ship CUDA-enabled binaries
+    (CUDA builds require runtime libraries matched to the host's CUDA
+    install, which varies per machine). When a source build fails, this
+    downloads the CPU-only release so the server can still run rather than
+    leaving the user with nothing — performance will be reduced, and this
+    is clearly surfaced to the user.
+
+    Args:
+        version: llama.cpp version/tag (e.g. "b9596")
+        compute_cap: Compute capability (e.g. "12.0"), used only for cache pathing
+        cache_dir: Where to extract the binary
+
+    Returns:
+        Path to llama-server binary, or None if download/extract failed
+    """
+    print_warn("Falling back to CPU-only prebuilt binary (reduced performance)")
+
+    system = platform.system().lower()
+    if system == "linux":
+        asset_substr = "ubuntu-x64.zip"
+    elif system == "darwin":
+        asset_substr = "macos-arm64.zip" if platform.machine() == "arm64" else "macos-x64.zip"
+    else:
+        print_error(f"No prebuilt binary available for platform '{system}'")
+        return None
+
+    try:
+        # Resolve the release tag to query
+        tag = version if version.startswith("b") else "latest"
+        api_url = (
+            f"https://api.github.com/repos/ggml-org/llama.cpp/releases/{'latest' if tag == 'latest' else f'tags/{tag}'}"
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meta_path = os.path.join(tmpdir, "release.json")
+            print_info(f"Querying llama.cpp releases ({tag})...")
+            r = subprocess.run(
+                ["curl", "-sSL", api_url, "-o", meta_path],
+                capture_output=True, text=True, timeout=30
+            )
+            if r.returncode != 0:
+                print_error("Failed to query GitHub releases API")
+                return None
+
+            import json as _json
+            with open(meta_path) as f:
+                release = _json.load(f)
+
+            asset_url = None
+            for asset in release.get("assets", []):
+                if asset_substr in asset.get("name", ""):
+                    asset_url = asset.get("browser_download_url")
+                    break
+
+            if not asset_url:
+                print_error(f"No matching prebuilt asset found ({asset_substr})")
+                return None
+
+            zip_path = os.path.join(tmpdir, "release.zip")
+            print_info("Downloading prebuilt binary...")
+            r = subprocess.run(
+                ["curl", "-sSL", asset_url, "-o", zip_path],
+                capture_output=True, text=True, timeout=300
+            )
+            if r.returncode != 0:
+                print_error("Failed to download prebuilt binary")
+                return None
+
+            extract_dir = os.path.join(tmpdir, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+            r = subprocess.run(
+                ["unzip", "-o", "-q", zip_path, "-d", extract_dir],
+                capture_output=True, text=True, timeout=60
+            )
+            if r.returncode != 0:
+                print_error("Failed to extract prebuilt binary archive")
+                return None
+
+            # Locate llama-server in extracted tree and copy alongside its libs
+            os.makedirs(cache_dir, exist_ok=True)
+            files_copied = 0
+            for root, _, files in os.walk(extract_dir):
+                for fname in files:
+                    src = os.path.join(root, fname)
+                    dst = os.path.join(cache_dir, fname)
+                    try:
+                        shutil.copy2(src, dst)
+                        if fname in ("llama-server", "llama-server.exe"):
+                            os.chmod(dst, 0o755)
+                        files_copied += 1
+                    except Exception:
+                        pass
+
+            if files_copied == 0:
+                print_error("No files found in prebuilt archive")
+                return None
+
+            server_path = os.path.join(cache_dir, "llama-server")
+            if os.path.isfile(server_path) and os.access(server_path, os.X_OK):
+                print_ok(f"CPU-only binary ready: {server_path}")
+                print_warn("This is a CPU-only build. GPU acceleration is unavailable.")
+                print_info("To enable GPU acceleration, fix the build environment and run:")
+                print_info("  llama setup --rebuild")
+                return server_path
+
+            print_error("llama-server not found in downloaded archive")
+            return None
+
+    except subprocess.TimeoutExpired:
+        print_error("Prebuilt binary download timed out")
+        return None
+    except Exception as e:
+        print_error(f"Prebuilt binary fallback failed: {e}")
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main Orchestration
 # ─────────────────────────────────────────────────────────────────────────────
 
