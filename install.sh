@@ -38,6 +38,7 @@ command -v gcc   >/dev/null || MISSING_PKGS+=("build-essential")
 command -v git   >/dev/null || MISSING_PKGS+=("git")
 command -v curl  >/dev/null || MISSING_PKGS+=("curl")
 command -v unzip >/dev/null || MISSING_PKGS+=("unzip")
+    dpkg -s python3-venv >/dev/null 2>&1 || MISSING_PKGS+=("python3-venv")
 if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
     echo -e "  ${CYAN}➜${NC} Installing missing packages: ${MISSING_PKGS[*]}"
     sudo apt-get update -qq
