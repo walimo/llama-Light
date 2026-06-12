@@ -28,7 +28,7 @@ echo -e "  ${GREEN}✓${NC} GPU: $GPU_NAME (SM$COMPUTE_CAP)"
 echo -e "\n${BLUE}[3/7]${NC} Determining CUDA version..."
 CAP_MAJOR=$(echo "$COMPUTE_CAP" | cut -d. -f1)
 if [ "$CAP_MAJOR" -ge 12 ]; then
-    CUDA_VERSION="13.0"
+    CUDA_VERSION="13.3"
     CUDA_ARCH="120"
 elif [ "$CAP_MAJOR" -ge 11 ]; then
     CUDA_VERSION="12.4"
@@ -58,7 +58,7 @@ if [ $NEED_CUDA -eq 1 ]; then
     sudo apt-get update -qq
 
     echo -e "  ${CYAN}➜${NC} Installing cuda-toolkit..."
-    sudo apt-get install -y cuda-toolkit-$CUDA_VERSION | tee /tmp/cuda.log
+    sudo apt-get install -y cuda-toolkit-${CUDA_VERSION//./-} | tee /tmp/cuda.log
 
     sudo ln -sf /usr/local/cuda-$CUDA_VERSION /usr/local/cuda 2>/dev/null || true
 
