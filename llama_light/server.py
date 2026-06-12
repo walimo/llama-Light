@@ -626,39 +626,62 @@ def install_service(
     flash_attn: bool = True,
 ) -> None:
     import shutil as _shutil
-    # Resolve the `llama` entry-point script; fall back to `python -m llama_light`
-    llama_bin  = _shutil.which("llama") or f"{sys.executable} -m llama_light"
-    flash_part = "--no-flash-attn" if not flash_attn else ""
-    svc_lines = [
+    from .config import get_config
+    cfg = get_config()
+
+    llama_bin = _shutil.which("llama") or f"{sys.executable} -m llama_light"
+    fa = "on" if flash_attn else "off"
+
+    # Build args list — mirrors start() so service uses full config
+    exec_parts = [
+        f"{llama_bin} start",
+        f'    --model "{model_path}"',
+        f"    --host {host} --port {port}",
+        f"    --ctx {ctx} --ngl {ngl}",
+        f"    --flash-attn {fa}",
+        f"    -b {cfg.batch_size} --ubatch-size {cfg.ubatch_size}",
+        f"    --threads {cfg.threads} --threads-batch {cfg.get('threads_batch', cfg.threads)}",
+        f"    --cache-type-k {cfg.get('cache_type_k', 'q4_0')} --cache-type-v {cfg.get('cache_type_v', 'q4_0')}",
+        f"    --parallel {cfg.parallel}",
+    ]
+    if not cfg.get("kv_offload", True):
+        exec_parts.append("    --no-kv-offload")
+    if cfg.get("cpu_moe", False):
+        exec_parts.append("    --cpu-moe")
+    if cfg.get("override_tensor"):
+        exec_parts.append(f"    --override-tensor {cfg.get('override_tensor')}")
+
+    exec_start = " \\\n".join(exec_parts)
+
+    # Deduplicate PATH entries
+    raw_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    seen, clean_path = set(), []
+    for p in raw_path.split(":"):
+        if p and p not in seen:
+            seen.add(p)
+            clean_path.append(p)
+
+    svc = "\n".join([
         "[Unit]",
         "Description=llama-light server daemon",
         "After=network.target",
         "",
         "[Service]",
         "Type=simple",
-        f'ExecStart={llama_bin} start \\',
-        f'    --model "{model_path}" \\',
-        f"    --host {host} --port {port} \\",
-        f"    --ctx {ctx} --ngl {ngl} \\",
-    ]
-    if flash_part:
-        svc_lines.append(f"    {flash_part}")
-    else:
-        svc_lines.append("")
-    svc_lines += [
+        f"ExecStart={exec_start}",
         "Restart=on-failure",
         "RestartSec=10",
-        f"Environment=PATH={os.environ.get('PATH', '/usr/bin:/usr/local/bin')}",
+        f"Environment=PATH={':'.join(clean_path)}",
         "",
         "[Install]",
         "WantedBy=default.target",
         "",
-    ]
-    service = "\n".join(svc_lines)
+    ])
+
     svc_path = _service_path()
     os.makedirs(os.path.dirname(svc_path), exist_ok=True)
     with open(svc_path, "w") as f:
-        f.write(service)
+        f.write(svc)
 
     try:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
