@@ -617,49 +617,13 @@ def chat_messages(
 def _service_path() -> str:
     return os.path.expanduser("~/.config/systemd/user/llama-server.service")
 
-def install_service(
-    model_path: str,
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    ctx: int = DEFAULT_CTX,
-    ngl: int = DEFAULT_GPU_LAYERS,
-    flash_attn: bool = True,
-) -> None:
+def install_service() -> None:
+    """Install a minimal systemd user service that runs `llama start`.
+    All server config is read from ~/.config/llama_light/config.json at startup.
+    To change settings: llama config set <key> <value>, then llama restart.
+    """
     import shutil as _shutil
-    from .config import get_config
-    cfg = get_config()
-
     llama_bin = _shutil.which("llama") or f"{sys.executable} -m llama_light"
-    fa = "on" if flash_attn else "off"
-
-    # Build args list — mirrors start() so service uses full config
-    exec_parts = [
-        f"{llama_bin} start",
-        f'    --model "{model_path}"',
-        f"    --host {host} --port {port}",
-        f"    --ctx {ctx} --ngl {ngl}",
-        f"    --flash-attn {fa}",
-        f"    -b {cfg.batch_size} --ubatch-size {cfg.ubatch_size}",
-        f"    --threads {cfg.threads} --threads-batch {cfg.get('threads_batch', cfg.threads)}",
-        f"    --cache-type-k {cfg.get('cache_type_k', 'q4_0')} --cache-type-v {cfg.get('cache_type_v', 'q4_0')}",
-        f"    --parallel {cfg.parallel}",
-    ]
-    if not cfg.get("kv_offload", True):
-        exec_parts.append("    --no-kv-offload")
-    if cfg.get("cpu_moe", False):
-        exec_parts.append("    --cpu-moe")
-    if cfg.get("override_tensor"):
-        exec_parts.append(f"    --override-tensor {cfg.get('override_tensor')}")
-
-    exec_start = " \\\n".join(exec_parts)
-
-    # Deduplicate PATH entries
-    raw_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
-    seen, clean_path = set(), []
-    for p in raw_path.split(":"):
-        if p and p not in seen:
-            seen.add(p)
-            clean_path.append(p)
 
     svc = "\n".join([
         "[Unit]",
@@ -668,10 +632,10 @@ def install_service(
         "",
         "[Service]",
         "Type=simple",
-        f"ExecStart={exec_start}",
+        f"ExecStart={llama_bin} start",
         "Restart=on-failure",
         "RestartSec=10",
-        f"Environment=PATH={':'.join(clean_path)}",
+        "Environment=PATH=/home/%u/.local/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
         "",
         "[Install]",
         "WantedBy=default.target",

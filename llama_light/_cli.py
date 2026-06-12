@@ -147,7 +147,7 @@ def cmd_run(args):
 
 def cmd_chat(args):
     _ensure_server_or_start(args)
-    system   = getattr(args, "system", None) or _CHAT_SYSTEM
+    system   = getattr(args, "system", None)
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -185,28 +185,13 @@ def cmd_chat(args):
 # ── Hermes / Claude persona helpers ──────────────────────────────────────────
 
 _HERMES_SYSTEM = (
-    "You are a concise, direct assistant. Answer immediately with working solutions. "
-    "No preamble, no restating the question, no unnecessary explanation. "
-    "If asked to write code, write the code. If asked a question, answer it. "
-    "Be terse. Prefer short responses unless detail is explicitly needed."
+    "You are Hermes, a highly capable AI assistant created by NousResearch. "
+    "You are precise, analytical, and thorough. Always reason step-by-step."
 )
 
 _CLAUDE_SYSTEM = (
-    "You are a concise, direct coding assistant. Give working solutions immediately. "
-    "No preamble, no explanation unless asked. Never restate the question. "
-    "Prefer the shortest correct response. Skip filler phrases like 'Certainly!' or 'Great question'."
-)
-
-_CHAT_SYSTEM = (
-    "You are a concise, direct assistant. Answer immediately. "
-    "No preamble, no filler, no restating the question. "
-    "Be terse. Short responses unless detail is explicitly needed."
-)
-
-_WEBUI_SYSTEM = (
-    "You are a concise, direct assistant. Answer immediately with working solutions. "
-    "No preamble, no filler phrases, no restating the question. "
-    "Be terse. Prefer short responses unless detail is explicitly needed."
+    "You are Claude, an AI assistant by Anthropic. "
+    "You are helpful, harmless, and honest. Think carefully before answering."
 )
 
 
@@ -533,32 +518,16 @@ def cmd_webui(args):
     port = state.get("port", 8080)
     host = state.get("host", "127.0.0.1")
     url = f"http://{host}:{port}"
-    # Inject system prompt via query param (llama.cpp web UI honours ?system=)
-    import urllib.parse
-    url_with_system = f"{url}?system={urllib.parse.quote(_WEBUI_SYSTEM)}"
-    print(f"[webui] opening {url_with_system}")
+    print(f"[webui] opening {url}")
     try:
-        webbrowser.open(url_with_system)
+        webbrowser.open(url)
     except Exception as e:
         print(f"[webui] could not open browser: {e}")
         print(f"       Open manually: {url}")
 
 
 def cmd_service_install(args):
-    cfg   = get_config()
-    model = (getattr(args, "model", None) or cfg.default_model or cfg.last_model)
-    if not model:
-        print("[error] no model. Pass --model or set default_model")
-        sys.exit(1)
-    sa = _resolve_server_args(args)
-    install_service(
-        model_path=model,
-        host=sa["host"],
-        port=sa["port"],
-        ctx=sa["ctx"],
-        ngl=sa["gpu_layers"],
-        flash_attn=sa["flash_attn"],
-    )
+    install_service()
 
 
 def cmd_service_remove(_args):
@@ -630,12 +599,126 @@ def _resolve_gen_args(args) -> dict:
     return {
         "temperature":         _resolve("temperature", args.temperature, model_cfg.get("temperature"), cfg.get("temperature", 0.7)),
         "top_k":               _resolve("top_k", args.top_k, model_cfg.get("top_k"), cfg.get("top_k", 40)),
-        "max_tokens":          _resolve("max_tokens", args.max_tokens, model_cfg.get("max_tokens"), cfg.get("max_tokens", 4096)),
+        "max_tokens":          _resolve("max_tokens", args.max_tokens, model_cfg.get("max_tokens"), cfg.get("max_tokens", 2048)),
         "top_p":               _resolve("top_p", args.top_p, model_cfg.get("top_p"), 0.95),
         "min_p":               _resolve("min_p", args.min_p, model_cfg.get("min_p"), 0.05),
         "frequency_penalty":   _resolve("frequency_penalty", args.frequency_penalty, model_cfg.get("frequency_penalty"), 0.0),
         "presence_penalty":    _resolve("presence_penalty", args.presence_penalty, model_cfg.get("presence_penalty"), 0.0),
     }
+
+
+# ── Parser ────────────────────────────────────────────────────────────────────
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="llama",
+        description="llama-Light — Ollama-style llama.cpp wrapper",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    # start / restart
+    for cmd, help_str, fn in [
+        ("start",   "Start llama-server daemon", cmd_start),
+        ("restart", "Stop then start",           cmd_restart),
+    ]:
+        p = sub.add_parser(cmd, help=help_str)
+        _server_args(p)
+        p.set_defaults(func=fn)
+
+    # stop / kill
+    sub.add_parser("stop", help="Stop (SIGTERM)").set_defaults(func=cmd_stop)
+    sub.add_parser("kill", help="Kill  (SIGKILL)").set_defaults(func=cmd_kill)
+
+    # run — single-shot prompt
+    p = sub.add_parser("run", help="One-shot prompt")
+    _server_args(p)
+    _gen_args(p)
+    p.add_argument("--prompt", required=True)
+    p.set_defaults(func=cmd_run)
+
+    # chat — interactive loop
+    p = sub.add_parser("chat", help="Interactive chat loop")
+    _server_args(p)
+    _gen_args(p)
+    p.set_defaults(func=cmd_chat)
+
+  # hermes — NousResearch Hermes persona
+    #   llama hermes              → launch Hermes TUI (error if not installed)
+    #   llama hermes --prompt     → single-shot reply
+    p = sub.add_parser(
+        "hermes",
+        help="Launch Hermes TUI wired to local model (error if not installed)",
+    )
+    _server_args(p)
+    _gen_args(p)
+    p.add_argument("--prompt", default=None, help="Single-shot prompt")
+    p.set_defaults(func=cmd_hermes)
+
+    # hermes-desktop — launch the Hermes Electron desktop app
+    p = sub.add_parser(
+        "hermes-desktop",
+        help="Launch the Hermes Electron desktop app (error if not installed)",
+    )
+    _server_args(p)
+    p.set_defaults(func=cmd_hermes_desktop)
+
+    # claude — real Claude Code CLI wired to local model
+    p = sub.add_parser(
+        "claude",
+        help="Launch Claude Code CLI with local model (error if 'claude' not in PATH)",
+    )
+    _server_args(p)
+    _gen_args(p)
+    p.add_argument("--prompt", default=None, help="Single-shot prompt")
+    p.set_defaults(func=cmd_claude)
+
+    # pull / ls / rm
+    p = sub.add_parser("pull", help="Download a GGUF from Hugging Face")
+    p.add_argument("--repo",     required=True)
+    p.add_argument("--file",     required=True)
+    p.add_argument("--model-id", default=None, dest="model_id")
+    p.set_defaults(func=cmd_pull)
+
+    sub.add_parser("ls", help="List downloaded models").set_defaults(func=cmd_ls)
+
+    p = sub.add_parser("rm", help="Remove a model")
+    p.add_argument("model_id")
+    p.add_argument("--file", default=None)
+    p.set_defaults(func=cmd_rm)
+
+    # server info
+    sub.add_parser("ps",     help="Show running server table").set_defaults(func=cmd_ps)
+    sub.add_parser("status", help="Show server status").set_defaults(func=cmd_status)
+
+    p = sub.add_parser("logs", help="Tail server log")
+    p.add_argument("--lines", "-n", type=int, default=40)
+    p.set_defaults(func=cmd_logs)
+
+    sub.add_parser("version").set_defaults(func=cmd_version)
+    sub.add_parser("info",    help="Show llama-Light environment info").set_defaults(func=cmd_info)
+
+    # webui
+    sub.add_parser("webui", help="Open llama.cpp web UI in browser").set_defaults(func=cmd_webui)
+
+    # config
+    p_cfg = sub.add_parser("config", help="Get/set configuration")
+    cfg_sub = p_cfg.add_subparsers(dest="config_cmd", required=True)
+    cfg_sub.add_parser("show").set_defaults(func=cmd_config_show)
+    cfg_sub.add_parser("backup").set_defaults(func=cmd_config_backup)
+    p_restore = cfg_sub.add_parser("restore")
+    p_restore.add_argument("--latest", action="store_true", default=False,
+        help="Restore the latest backup (default)")
+    p_restore.add_argument("--path", default=None,
+        help="Explicit backup path to restore")
+    p_restore.set_defaults(func=cmd_config_restore)
+    cfg_sub.add_parser("list-backups").set_defaults(func=cmd_config_list_backups)
+    p_set = cfg_sub.add_parser("set")
+    p_set.add_argument("key")
+    p_set.add_argument("value")
+    p_set.add_argument("--model", default=None,
+        help="Per-model config (creates/updates per-model settings)")
+    p_set.set_defaults(func=cmd_config_set)
+
 
 
 def cmd_config_list_backups(args):
@@ -719,25 +802,23 @@ def build_parser() -> argparse.ArgumentParser:
     _gen_args(p)
     p.set_defaults(func=cmd_chat)
 
-    # hermes — NousResearch Hermes persona
-    #   llama hermes           → launch Hermes TUI (error if not installed)
-    #   llama hermes --prompt  → single-shot reply
-    p = sub.add_parser('hermes', help='Launch Hermes TUI wired to local model (error if not installed)')
+    # hermes
+    p = sub.add_parser('hermes', help='Launch Hermes TUI wired to local model')
     _server_args(p)
     _gen_args(p)
-    p.add_argument('--prompt', default=None, help='Single-shot prompt')
+    p.add_argument('--prompt', default=None)
     p.set_defaults(func=cmd_hermes)
 
-    # hermes-desktop — launch the Hermes Electron desktop app
+    # hermes-desktop
     p = sub.add_parser('hermes-desktop', help='Launch Hermes Electron desktop app')
     _server_args(p)
     p.set_defaults(func=cmd_hermes_desktop)
 
-    # claude — real Claude Code CLI wired to local model
-    p = sub.add_parser('claude', help="Launch Claude Code CLI with local model (error if 'claude' not in PATH)")
+    # claude
+    p = sub.add_parser('claude', help='Launch Claude Code CLI with local model')
     _server_args(p)
     _gen_args(p)
-    p.add_argument('--prompt', default=None, help='Single-shot prompt')
+    p.add_argument('--prompt', default=None)
     p.set_defaults(func=cmd_claude)
 
     # pull / ls / rm
