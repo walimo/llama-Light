@@ -147,7 +147,7 @@ def detect_cuda_version() -> Optional[str]:
             ["nvcc", "--version"],
             capture_output=True, text=True, timeout=5
         )
-        for line in r.stdout.read().splitlines():
+        for line in r.stdout.splitlines():
             if "release" in line.lower():
                 match = re.search(r'release (\d+\.\d+)', line)
                 if match:
@@ -257,13 +257,15 @@ def run_with_progress(cmd, cwd: str, description: str, timeout: Optional[int] = 
         )
         
         last_update = time.time()
-        while process.poll() is None:
-            # Show progress every 5 seconds for long-running operations
+        output_lines = []
+        # Drain stdout line-by-line to prevent pipe buffer deadlock on large builds
+        for line in process.stdout:
+            output_lines.append(line.rstrip())
             if time.time() - last_update > 5:
                 elapsed = int(time.time() - last_update)
                 print(f"     Still working... ({elapsed}s)", end="\r")
                 last_update = time.time()
-            time.sleep(0.5)
+        process.wait()
         
         # Clear progress line
         print(" " * 50, end="\r")
@@ -274,10 +276,8 @@ def run_with_progress(cmd, cwd: str, description: str, timeout: Optional[int] = 
         else:
             print_error(f"{description} failed (exit code {process.returncode})")
             # Show last few lines of output for debugging
-            if process.stdout:
-                lines = process.stdout.read().splitlines()[-3:]
-                for line in lines:
-                    print(f"     {line}")
+            for line in output_lines[-3:]:
+                print(f"     {line}")
             return False
     
     except subprocess.TimeoutExpired:
@@ -641,8 +641,14 @@ def ensure_binaries(version: str) -> Tuple[Optional[str], Optional[str]]:
         if server:
             progress.done()
             return cache_dir, server
-    
-    print_error("Build failed. Check CUDA installation and try again.")
+
+    print_warn("Source build failed. Trying prebuilt binary fallback...")
+    server = download_prebuilt_binary(version, compute_cap, cache_dir)
+    if server:
+        progress.done()
+        return cache_dir, server
+
+    print_error("Build failed and no prebuilt binary available.")
     return None, None
 
 

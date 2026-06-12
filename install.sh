@@ -19,6 +19,33 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 
 # -----------------------------------------------------------------------------
+# Sudo Credential Cache — prompt once, run everything unattended
+# -----------------------------------------------------------------------------
+echo -e "${CYAN}➜${NC} This installer needs sudo for system packages. Enter your password once:"
+sudo -v
+# Keep sudo timestamp alive in background for the duration of the script
+( while true; do sudo -n true; sleep 50; done ) &
+SUDO_KEEPALIVE_PID=$!
+trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null' EXIT
+
+# -----------------------------------------------------------------------------
+# [0/7] Pre-flight: Build Dependencies
+# -----------------------------------------------------------------------------
+echo -e "${BLUE}[0/7]${NC} Checking build dependencies..."
+MISSING_PKGS=()
+command -v cmake >/dev/null || MISSING_PKGS+=("cmake")
+command -v gcc   >/dev/null || MISSING_PKGS+=("build-essential")
+command -v git   >/dev/null || MISSING_PKGS+=("git")
+command -v curl  >/dev/null || MISSING_PKGS+=("curl")
+command -v unzip >/dev/null || MISSING_PKGS+=("unzip")
+if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    echo -e "  ${CYAN}➜${NC} Installing missing packages: ${MISSING_PKGS[*]}"
+    sudo apt-get update -qq
+    sudo apt-get install -y "${MISSING_PKGS[@]}" > /dev/null
+fi
+echo -e "  ${GREEN}✓${NC} Build toolchain ready"
+
+# -----------------------------------------------------------------------------
 # [1/7] Python Runtime Verification
 # -----------------------------------------------------------------------------
 echo -e "${BLUE}[1/7]${NC} Checking Python Environment..."
@@ -30,7 +57,18 @@ echo -e "  ${GREEN}✓${NC} Python $PY_VER Detected"
 # [2/7] Hardware Architecture Extraction
 # -----------------------------------------------------------------------------
 echo -e "\n${BLUE}[2/7]${NC} Detecting GPU Microarchitecture..."
-command -v nvidia-smi >/dev/null || { echo -e "${RED}✗ NVIDIA Management Library (nvidia-smi) missing. Installation aborted.${NC}"; exit 1; }
+if ! command -v nvidia-smi >/dev/null; then
+    echo -e "  ${YELLOW}⚠${NC} NVIDIA driver not detected. Installing automatically..."
+    sudo apt-get update -qq
+    sudo apt-get install -y ubuntu-drivers-common > /dev/null
+    sudo ubuntu-drivers autoinstall
+    echo -e "\n${YELLOW}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║  NVIDIA drivers installed — a REBOOT is required.        ║${NC}"
+    echo -e "${YELLOW}║  After rebooting, run this command again to continue:    ║${NC}"
+    echo -e "${YELLOW}║    curl -sSL https://raw.githubusercontent.com/walimo/llama-Light/main/install.sh | bash  ║${NC}"
+    echo -e "${YELLOW}╚══════════════════════════════════════════════════════════╝${NC}"
+    exit 0
+fi
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1)
 echo -e "  ${GREEN}✓${NC} GPU Identity: $GPU_NAME (SM$COMPUTE_CAP)"
@@ -108,10 +146,19 @@ else
     echo -e "  ${GREEN}✓${NC} Toolchain profile satisfies optimization standard (CUDA up to date)"
 fi
 
-# CRITICAL STEP: Inject paths immediately to current active script memory buffer
-# This guarantees step [7/7] has immediate kernel compiler privileges
-export PATH="/usr/local/cuda/bin:$PATH"
+# Inject CUDA paths into current script session
+export PATH="/usr/local/cuda/bin:$HOME/.local/bin:$PATH"
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+
+# Persist ~/.local/bin to /etc/environment so it survives curl|bash subshells and reboots
+if ! grep -q "$HOME/.local/bin" /etc/environment 2>/dev/null; then
+    # Append to PATH line in /etc/environment or create it
+    if grep -q "^PATH=" /etc/environment 2>/dev/null; then
+        sudo sed -i "s|^PATH="\(.*\)"|PATH="$HOME/.local/bin:\1"|" /etc/environment
+    else
+        echo "PATH="$HOME/.local/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"" | sudo tee -a /etc/environment > /dev/null
+    fi
+fi
 
 # -----------------------------------------------------------------------------
 # [6/7] Virtual Isolation Sandboxing
@@ -134,13 +181,16 @@ echo -e "  ${GREEN}✓${NC} Core package modules compiled into sandbox"
 # [7/7] Native Hardware Compilation
 # -----------------------------------------------------------------------------
 echo -e "\n${BLUE}[7/7]${NC} Building Native Architectural Kernels..."
-export PATH="$HOME/.local/bin:$PATH"
 export CMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH"
 
 # Pipe parsing correctly formats output streams using standard stream tracking flags
 "$VENV_DIR/bin/llama" setup 2>&1 | while IFS= read -r line; do 
     echo -e "  ${CYAN}➜${NC} $line"
-done
+done; LLAMA_SETUP_EXIT="${PIPESTATUS[0]}"
+if [ "${LLAMA_SETUP_EXIT}" != "0" ]; then
+    echo -e "  ${RED}✗${NC} llama setup failed (exit $LLAMA_SETUP_EXIT)"
+    exit 1
+fi
 
 echo -e "\n${GREEN}✅ Production Installation Matrix Complete!${NC}"
 echo "Run: llama config set default_model <your-model.gguf>"
