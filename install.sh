@@ -54,7 +54,7 @@ if [ $NEED_CUDA -eq 1 ]; then
     
     # Add repo (works on Pop!_OS)
     sudo apt-get update -qq
-    wget -qO- https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb | sudo dpkg -i -
+    wget -q -O /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \&\& sudo dpkg -i /tmp/cuda-keyring.deb \&\& rm /tmp/cuda-keyring.deb
     sudo apt-get update -qq
 
     echo -e "  ${CYAN}➜${NC} Installing cuda-toolkit..."
