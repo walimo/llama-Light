@@ -26,7 +26,7 @@ VERSION = "0.2.0"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _resolve_model_arg(args: argparse.Namespace) -> str:
+def _resolve_model_arg(args: argparse.Namespace) -> Optional[str]:
     m = getattr(args, "model", None)
     if not m:
         return m

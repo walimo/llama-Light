@@ -248,25 +248,18 @@ class Config:
                 f"Valid keys: {known[:10]}... ({len(known)} total)"
             )
 
-        # Coerce from string
+        # Coerce from string — only for typed keys
         if isinstance(value, str):
-            if value.lower() == "true":
-                value = True
-            elif value.lower() == "false":
-                value = False
-            elif value.lower() in ("null", "none") and key not in _STRING_NONE_KEYS:
+            if key in _BOOL_KEYS and value.lower() in ("true", "false"):
+                value = value.lower() == "true"
+            elif key in _INT_KEYS:
+                value = int(value)
+            elif key in _FLOAT_KEYS:
+                value = float(value)
+            elif key not in _STRING_NONE_KEYS and value.lower() in ("null", "none"):
                 value = None
-            else:
-                try:
-                    i = int(value)
-                    if str(i) == value:
-                        value = i
-                except (ValueError, OverflowError):
-                    try:
-                        value = float(value)
-                    except ValueError:
-                        # Keep as string — it's valid for some keys
-                        pass
+            elif key in _STRING_NONE_KEYS and value.lower() == "none":
+                value = None
 
         self._data[key] = value
         if persist:

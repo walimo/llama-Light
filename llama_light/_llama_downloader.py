@@ -464,7 +464,7 @@ def download_prebuilt_binary(version: str, compute_cap: str, cache_dir: str) -> 
 
     system = platform.system().lower()
     if system == "linux":
-        asset_substr = "ubuntu-x64.zip"
+        asset_substr = "ubuntu-x64.tar.gz"
     elif system == "darwin":
         asset_substr = "macos-arm64.zip" if platform.machine() == "arm64" else "macos-x64.zip"
     else:

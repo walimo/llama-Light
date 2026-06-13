@@ -4,7 +4,7 @@
 
 ## Features
 
-- **Ollama‑style CLI**: `run`, `pull`, `ls`, `rm`, `cp`, `show`, `push`, `create`, `serve`, `stop`
+- **Ollama‑style CLI**: `run`, `pull`, `ls`, `rm`, `stop`
 - **All `llama-server` flags**: ctx, ngl, flash_attn, cache types, RoPE, YaRN, MoE, reasoning
 - **Hardware auto‑detection**: GPU, CPU → `cache_type`, `ngl`, `threads`
 - **Model registry**: scans Hugging Face cache, OCI manifests + blobs
@@ -55,10 +55,6 @@ llama stop
 | `llama pull --repo <repo> --file <file>` | Download GGUF from HuggingFace |
 | `llama ls` | List cached GGUF models (scans HF cache) |
 | `llama rm <name>` | Remove model from registry and disk |
-| `llama cp <source> <dest>` | Copy model (new manifest, same blobs) |
-| `llama show <model>` | Display OCI manifest |
-| `llama push <model>` | Push to registry (stub) |
-| `llama create <model> -f <Modelfile>` | Create from Modelfile (stub) |
 | `llama ps` | Enhanced process list (PID, ctx, ngl, batch, threads, flash, uptime) |
 | `llama status` | Verbose status (PID, health, log path) |
 | `llama logs [-n N]` | Tail server log |

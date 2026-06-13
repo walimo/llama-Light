@@ -289,7 +289,7 @@ def start(
     print(f"  ngl   : {m_ngl}")
     print(f"  log   : {log_file}")
 
-   # Graceful shutdown — clean up on SIGTERM/SIGINT
+    # Graceful shutdown — clean up on SIGTERM/SIGINT
     proc_ref = [None]  # mutable container so _shutdown can access proc after Popen
     def _shutdown(sig, frame):
         print(f"\n[start] shutting down (signal {sig})", end="", flush=True)
