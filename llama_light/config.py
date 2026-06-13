@@ -27,7 +27,8 @@ _FLOAT_KEYS = {"min_p", "temperature", "top_p", "frequency_penalty",
                "yarn_ext_factor", "yarn_attn_factor", "yarn_beta_slow", "yarn_beta_fast"}
 # Keys that must be bool when set
 _BOOL_KEYS = {"mlock", "mmap", "direct_io", "no_host", "kv_offload",
-              "repack", "swa_full", "perf", "escape", "cpu_moe", "tool_calling"}
+              "repack", "swa_full", "perf", "escape", "cpu_moe", "tool_calling",
+              "reasoning"}
 # Keys where "none" is a valid string (not a null sentinel)
 _STRING_NONE_KEYS = {
     "reasoning_format", "flash_attn", "split_mode", "numa",
