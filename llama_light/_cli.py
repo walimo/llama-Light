@@ -148,6 +148,8 @@ def cmd_run(args):
 def cmd_chat(args):
     _ensure_server_or_start(args)
     system   = getattr(args, "system", None)
+    if system is None:
+        system = _CHAT_SYSTEM
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -192,6 +194,16 @@ _HERMES_SYSTEM = (
 _CLAUDE_SYSTEM = (
     "You are Claude, an AI assistant by Anthropic. "
     "You are helpful, harmless, and honest. Think carefully before answering."
+)
+
+_CHAT_SYSTEM = (
+    "You are a concise, capable AI coding assistant. "
+    "Be direct, precise, and terse. No fluff."
+)
+
+_WEBUI_SYSTEM = (
+    "You are a concise, capable AI coding assistant. "
+    "Be direct, precise, and terse. No fluff."
 )
 
 
@@ -465,7 +477,7 @@ def cmd_config_set(args):
     model = getattr(args, "model", None)
     if model:
         from .per_model import update_model_config, _model_name_from_path
-        from .config import _INT_KEYS, _FLOAT_KEYS
+        from .config import _INT_KEYS, _FLOAT_KEYS, _BOOL_KEYS
         resolved = _resolve_model_arg(args) if model != "auto" else None
         name = _model_name_from_path(resolved) if resolved else model
         value = args.value
@@ -473,6 +485,8 @@ def cmd_config_set(args):
             value = int(value)
         elif args.key in _FLOAT_KEYS:
             value = float(value)
+        elif args.key in _BOOL_KEYS:
+            value = value.lower() in ("true", "1", "yes", "on")
         update_model_config(name, args.key, value)
         print(f"[config] [{name}] {args.key} = {value}")
     else:
@@ -506,6 +520,8 @@ def cmd_webui(args):
     port = state.get("port", 8080)
     host = state.get("host", "127.0.0.1")
     url = f"http://{host}:{port}"
+    sys_param = _WEBUI_SYSTEM.replace(" ", "+")
+    url += "?system=" + sys_param
     print(f"[webui] opening {url}")
     try:
         webbrowser.open(url)

@@ -41,7 +41,7 @@ def pull(repo_id: str, filename: str,
             repo_id=repo_id,
             filename=filename,
             local_dir=_model_dir(mid),
-            revision=revision or "main",
+            revision=revision,
         )
         print(f"[pull] saved → {path}")
         return path

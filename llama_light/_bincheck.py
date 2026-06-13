@@ -49,7 +49,7 @@ def _set_ld_library_path(lib_dir: str) -> None:
     if not lib_dir or not os.path.isdir(lib_dir):
         return
     existing = os.environ.get("LD_LIBRARY_PATH", "")
-    if lib_dir not in existing.split(":"):
+    if not (existing and lib_dir in existing.split(":")):
         os.environ["LD_LIBRARY_PATH"] = lib_dir + (":" + existing if existing else "")
 
 def locate_self() -> Optional[str]:

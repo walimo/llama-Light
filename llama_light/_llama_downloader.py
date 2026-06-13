@@ -657,18 +657,42 @@ def ensure_binaries(version: str) -> Tuple[Optional[str], Optional[str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_version(version: str) -> str:
-    """Stub: Check if version is up to date."""
-    return "up_to_date"
+    """Check if the cached binary exists for the current GPU architecture.
+    
+    Returns:
+        "up_to_date"  — binary found for current compute cap
+        "missing"     — binary not found for any compute cap
+        "outdated"    — binary found but for a different compute cap
+    """
+    gpu = detect_gpu()
+    compute_cap = gpu.get("compute_cap", "")
+    # First, check if the requested version binary exists at all
+    exact_path = binary_path(version, compute_cap)
+    if exact_path and os.path.isfile(exact_path):
+        return "up_to_date"
+    # Check if any version binary exists (at least one compute cap)
+    # binary_path for the version with a wildcard or common cap
+    alt_path = binary_path(version, "") if compute_cap else None
+    if not alt_path:
+        # Try without compute cap suffix
+        for cap_try in ("", "86", "89", "90", "120"):
+            p = binary_path(version, cap_try)
+            if p and os.path.isfile(p):
+                return "outdated"
+        return "missing"
+    return "missing"
 
 
 def upgrade() -> bool:
-    """Stub: Upgrade to latest version."""
-    return False
+    """Upgrade cached binaries to the latest version."""
+    ensure_binaries("latest")
+    return True
 
 
 def bundled_tool_binaries() -> dict:
-    """Stub: Return bundled tool binaries."""
-    return {}
+    """Return bundled tool binaries."""
+    from . import _bincheck
+    return _bincheck.bundled_tool_binaries()
 
 
 def check_with_subcmd(name: str, subcmd: str, install_hint: str = "") -> str:

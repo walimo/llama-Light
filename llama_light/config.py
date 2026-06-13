@@ -37,7 +37,7 @@ _STRING_NONE_KEYS = {
 _VALID_KEYS = set(_INT_KEYS) | set(_FLOAT_KEYS) | set(_BOOL_KEYS) | _STRING_NONE_KEYS | {
     "host", "port", "default_model", "last_model", "device", "numa",
     "override_tensor", "ui_mcp_proxy", "tools",
-    "reasoning", "active_profile", "tool_calling",
+    "reasoning", "active_profile",
 }
 
 
@@ -56,7 +56,7 @@ GLOBAL_CONFIG    = os.path.join(CONFIG_DIR, "config.json")
 # ── Env overrides ─────────────────────────────────────────────────────────────
 DEFAULT_HOST       = "127.0.0.1"
 DEFAULT_PORT       = 8080
-DEFAULT_CTX        = 4096
+DEFAULT_CTX        = 200000
 DEFAULT_GPU_LAYERS = 99
 LLAMA_HOST   = os.environ.get("LLAMA_HOST",  DEFAULT_HOST)
 _LLAMA_PORT_str = os.environ.get("LLAMA_PORT")
@@ -140,7 +140,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "default_model":    None,
         "last_model":       None,
         # Context / batching
-        "ctx":              4096,
+        "ctx":              200000,
         "batch_size":       512,
         "ubatch_size":      512,
         "parallel":         1,

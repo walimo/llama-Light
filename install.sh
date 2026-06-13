@@ -105,8 +105,8 @@ echo -e "\n${BLUE}[3/7]${NC} Matching Compute Target Matrix..."
 CAP_MAJOR=$(echo "$COMPUTE_CAP" | cut -d. -f1)
 
 if [ "$CAP_MAJOR" -ge 12 ]; then
-    CUDA_VERSION="13.3"
-    CUDA_ARCH="120a"      # Blackwell SM12.0 native profile
+    CUDA_VERSION="12.8"
+    CUDA_ARCH="120"
 elif [ "$CAP_MAJOR" -ge 11 ]; then
     CUDA_VERSION="12.4"
     CUDA_ARCH="110"

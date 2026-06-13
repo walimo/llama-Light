@@ -241,7 +241,7 @@ def start(
         args += ["--n-cpu-moe", str(cfg.get("n_cpu_moe"))]
 
     # reasoning — model-level setting overrides global
-    m_reasoning    = model_cfg.get("reasoning",  cfg.get("reasoning",  True))
+    m_reasoning    = model_cfg.get("reasoning",  cfg.get("reasoning",  False))
     reasoning_on   = str(m_reasoning).lower() not in ("false", "off", "0") and m_reasoning is not False
     m_reason_budget = model_cfg.get("reasoning_budget", cfg.get("reasoning_budget", 0))
     if not reasoning_on:
@@ -290,12 +290,12 @@ def start(
     print(f"  log   : {log_file}")
 
    # Graceful shutdown — clean up on SIGTERM/SIGINT
-    original_sig = signal.getsignal(signal.SIGTERM)
+    proc_ref = [None]  # mutable container so _shutdown can access proc after Popen
     def _shutdown(sig, frame):
         print(f"\n[start] shutting down (signal {sig})", end="", flush=True)
         try:
-            os.kill(proc.pid, signal.SIGTERM)
-        except OSError:
+            os.kill(proc_ref[0].pid, signal.SIGTERM)
+        except (OSError, AttributeError):
             pass
         _clear_state()
         print(" done")
@@ -310,6 +310,7 @@ def start(
             stdin=subprocess.DEVNULL,
             start_new_session=True,
         )
+        proc_ref[0] = proc
 
     _write_state({
         "pid":            proc.pid,
@@ -372,10 +373,12 @@ def restart(model_path: Optional[str] = None, **kwargs) -> None:
     mp = model_path or _read_state().get("model_path")
     if not mp:
         raise RuntimeError("No model known — pass --model")
+    # Save port before stopping (state may be cleared by stop)
+    port = kwargs.get("port", _read_state().get("port", DEFAULT_PORT))
     stop()
     # Wait for port to free up (TCP TIME_WAIT handling)
     state = _read_state()
-    port = kwargs.get("port", state.get("port", DEFAULT_PORT))
+    port = kwargs.get("port", state.get("port", port))
     deadline = time.time() + 30
     while _detect_port_in_use(port=port):
         if time.time() > deadline:
