@@ -13,9 +13,8 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Log file for build output
+# Log file for build output (captures stderr only)
 LOG_FILE="/tmp/llama-light-install.log"
-exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║     🚀 llama-Light - One Command LLM Server (Auto CUDA)    ║${NC}"
@@ -27,7 +26,7 @@ echo ""
 # -----------------------------------------------------------------------------
 die() {
     echo -e "${RED}✗ Error: $*${NC}" >&2
-    echo "Full log: $LOG_FILE"
+    echo "Full log: $LOG_FILE" >&2
     exit 1
 }
 
@@ -35,10 +34,10 @@ die() {
 # Sudo credential caching – keep alive during the whole script
 # -----------------------------------------------------------------------------
 echo -e "${CYAN}➜${NC} This installer needs sudo for system packages. Enter your password once:"
-sudo -v || die "sudo failed"
+sudo -S -p '' -v || die "sudo failed"
 (
     while true; do
-        sudo -n true
+        sudo -S -p '' -n true
         sleep 50
     done
 ) 2>/dev/null &
@@ -65,8 +64,8 @@ command -v unzip >/dev/null || MISSING_PKGS+=("unzip")
 dpkg -s python3-venv >/dev/null 2>&1 || MISSING_PKGS+=("python3-venv")
 if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
     echo -e "  ${CYAN}➜${NC} Installing missing packages: ${MISSING_PKGS[*]}"
-    sudo apt-get update -qq
-    sudo apt-get install -y "${MISSING_PKGS[@]}" > /dev/null
+    sudo -S -p '' apt-get update -qq
+    sudo -S -p '' apt-get install -y "${MISSING_PKGS[@]}" > /dev/null
 fi
 echo -e "  ${GREEN}✓${NC} Build toolchain ready"
 
@@ -83,26 +82,23 @@ echo -e "  ${GREEN}✓${NC} Python $PY_VER Detected"
 # -----------------------------------------------------------------------------
 echo -e "\n${BLUE}[2/7]${NC} Detecting GPU Microarchitecture..."
 if ! command -v nvidia-smi >/dev/null; then
-    echo -e "  ${YELLOW}⚠${NC} NVIDIA driver not detected. Installing automatically..."
-    sudo apt-get update -qq
-    sudo apt-get install -y ubuntu-drivers-common > /dev/null
-    sudo ubuntu-drivers autoinstall
-    echo -e "\n${YELLOW}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║  NVIDIA drivers installed — a REBOOT is required.        ║${NC}"
-    echo -e "${YELLOW}║  After rebooting, run this command again to continue:    ║${NC}"
-    echo -e "${YELLOW}║    ./install.sh                                          ║${NC}"
-    echo -e "${YELLOW}╚══════════════════════════════════════════════════════════╝${NC}"
-    exit 0
+    echo -e "  ${RED}✗${NC} NVIDIA driver not detected."
+    echo -e "  Install drivers and rerun:"
+    echo -e "    sudo apt install nvidia-driver-550"
+    exit 1
 fi
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
-COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1)
+COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1) || COMPUTE_CAP="8.6"
+# Strip dot and normalise (e.g. "8.6" → "86")
+COMPUTE_CAP="${COMPUTE_CAP//./}"
+COMPUTE_CAP="${COMPUTE_CAP:-86}"
 echo -e "  ${GREEN}✓${NC} GPU Identity: $GPU_NAME (SM$COMPUTE_CAP)"
 
 # -----------------------------------------------------------------------------
 # [3/7] Dynamic Generation Target Mapping
 # -----------------------------------------------------------------------------
 echo -e "\n${BLUE}[3/7]${NC} Matching Compute Target Matrix..."
-CAP_MAJOR=$(echo "$COMPUTE_CAP" | cut -d. -f1)
+CAP_MAJOR="$(( COMPUTE_CAP / 10 ))"
 
 if [ "$CAP_MAJOR" -ge 12 ]; then
     CUDA_VERSION="12.8"
@@ -133,32 +129,32 @@ fi
 # -----------------------------------------------------------------------------
 if [ $NEED_CUDA -eq 1 ]; then
     echo -e "\n${BLUE}[5/7]${NC} Provisioning CUDA $CUDA_VERSION Ecosystem..."
-    
-    UBUNTU_DISTRO="ubuntu2204"
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        if [[ "${UBUNTU_CODENAME:-}" == "noble" || "${VERSION_ID:-}" == "24.04" ]]; then
-            UBUNTU_DISTRO="ubuntu2404"
-        fi
-    fi
+
+    # Start with ubuntu2404; fall back to ubuntu2204 if the repo doesn't exist
+    UBUNTU_DISTRO="ubuntu2404"
 
     echo -e "  ${CYAN}➜${NC} synchronizing package databases..."
-    sudo apt-get update -qq
-    
+    sudo -S -p '' apt-get update -qq
+
     echo -e "  ${CYAN}➜${NC} Configuring target microarchitecture keyring ($UBUNTU_DISTRO)..."
-    wget -q --timeout=30 -O /tmp/cuda-keyring.deb \
-        "https://developer.download.nvidia.com/compute/cuda/repos/${UBUNTU_DISTRO}/x86_64/cuda-keyring_1.1-1_all.deb" \
-        || die "Failed to download CUDA keyring"
-    sudo dpkg -i /tmp/cuda-keyring.deb || die "Failed to install CUDA keyring"
+    if ! wget -q --timeout=30 -O /tmp/cuda-keyring.deb \
+        "https://developer.download.nvidia.com/compute/cuda/repos/${UBUNTU_DISTRO}/x86_64/cuda-keyring_1.1-1_all.deb"; then
+        echo -e "  ${YELLOW}⚠${NC} ubuntu2404 CUDA repo not available — falling back to ubuntu2204."
+        UBUNTU_DISTRO="ubuntu2204"
+        wget -q --timeout=30 -O /tmp/cuda-keyring.deb \
+            "https://developer.download.nvidia.com/compute/cuda/repos/${UBUNTU_DISTRO}/x86_64/cuda-keyring_1.1-1_all.deb" \
+            || die "Failed to download CUDA keyring (ubuntu2204 repo also unavailable)"
+    fi
+    sudo -S -p '' dpkg -i /tmp/cuda-keyring.deb || die "Failed to install CUDA keyring"
     rm -f /tmp/cuda-keyring.deb
-    
-    sudo apt-get update -qq
+
+    sudo -S -p '' apt-get update -qq
 
     CUDA_APT_TAG="${CUDA_VERSION//./-}"
     echo -e "  ${CYAN}➜${NC} Deploying compiler assets (cuda-toolkit-${CUDA_APT_TAG})..."
-    sudo apt-get install -y "cuda-toolkit-${CUDA_APT_TAG}" > /dev/null || die "CUDA toolkit installation failed"
+    sudo -S -p '' apt-get install -y "cuda-toolkit-${CUDA_APT_TAG}" > /dev/null || die "CUDA toolkit installation failed"
 
-    sudo ln -sf "/usr/local/cuda-$CUDA_VERSION" /usr/local/cuda
+    sudo -S -p '' ln -sf "/usr/local/cuda-$CUDA_VERSION" /usr/local/cuda
 
     # Update user environment (bashrc)
     grep -q "cuda/bin" ~/.bashrc || echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
@@ -196,6 +192,11 @@ source "$VENV_DIR/bin/activate"
 pip install --upgrade pip -q
 pip install . -q || die "'pip install .' failed"
 
+# Verify the installed binary exists before creating the symlink
+if ! [ -f "$VENV_DIR/bin/llama" ]; then
+    die "Expected binary not found at $VENV_DIR/bin/llama — pip install may have failed silently"
+fi
+
 mkdir -p "$HOME/.local/bin"
 ln -sf "$VENV_DIR/bin/llama" "$HOME/.local/bin/llama"
 deactivate
@@ -208,7 +209,9 @@ echo -e "\n${BLUE}[7/7]${NC} Building Native Architectural Kernels..."
 export CMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH"
 
 LOG_SETUP="/tmp/llama-setup.log"
-"$VENV_DIR/bin/llama" setup 2>&1 | tee "$LOG_SETUP"
+# Use '|| true' to prevent set -e from killing the script when pipefail makes
+# the pipeline fail; then read PIPESTATUS to get the actual exit code.
+"$VENV_DIR/bin/llama" setup 2>&1 | tee "$LOG_SETUP" || true
 LLAMA_SETUP_EXIT="${PIPESTATUS[0]}"
 if [ "$LLAMA_SETUP_EXIT" -ne 0 ]; then
     echo -e "  ${RED}✗${NC} llama setup failed (exit $LLAMA_SETUP_EXIT). See $LOG_SETUP for details."
