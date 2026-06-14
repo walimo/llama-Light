@@ -98,6 +98,13 @@ def _print_server_env(env: Dict[str, str]) -> None:
 # ── Command handlers ──────────────────────────────────────────────────────────
 
 def cmd_start(args):
+    from .server import _systemd_active
+    if _systemd_active():
+        print("[start] service is active — running: systemctl --user start llama-server")
+        import subprocess
+        subprocess.run(["systemctl", "--user", "start", "llama-server.service"])
+        return
+
     cfg = get_config()
     model = getattr(args, "model", None) or cfg.default_model or cfg.last_model
     if not model:
