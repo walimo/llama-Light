@@ -194,9 +194,9 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "ui_mcp_proxy":     "on",
         "tools":            "all",
         # Reasoning
-        "reasoning":        False,
-        "reasoning_format": "none",
-        "reasoning_budget": 0,
+        "reasoning":        True,
+        "reasoning_format": "deepseek",
+        "reasoning_budget": 10000,
         # Profile
         "active_profile":   "default",
         # Tool calling
