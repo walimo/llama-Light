@@ -5,6 +5,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -31,8 +32,17 @@ def _read_state() -> Dict[str, Any]:
 
 def _write_state(state: Dict[str, Any]) -> None:
     ensure_dirs()
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(STATE_FILE) or ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp_path, STATE_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 def _clear_state() -> None:
     for p in (STATE_FILE, PID_FILE):
@@ -325,7 +335,7 @@ def start(
     signal.signal(signal.SIGINT, _shutdown)
 
     def _cleanup():
-        """Unregister signal handlers so start() callers can finish safely."""
+        """Unregister signal handlers so start() can return safely."""
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -342,15 +352,15 @@ def start(
         "log":            log_file,
     })
 
-    # Plain-text PID file — used by systemd's PIDFile= directive (Type=forking)
     with open(PID_FILE, "w") as f:
         f.write(str(proc.pid))
 
-    print(f"[start] pid {proc.pid} — waiting for server ...", end="", flush=True)
+    print(f"[start] pid {proc.pid} — waiting for server", end="", flush=True)
     deadline = time.time() + 180
     while time.time() < deadline:
         time.sleep(1)
         if not _is_running(proc.pid):
+            _cleanup()
             print(" FAILED")
             print(f"[start] process died — check {log_file}")
             _clear_state()
@@ -370,20 +380,28 @@ def start(
 # ── Stop / Kill / Restart ─────────────────────────────────────────────────────
 
 def stop() -> None:
-    """Stop the server. Always via systemd (KillMode=control-group kills everything)."""
+    """Stop the server gracefully via systemd."""
     if not _systemd_unit_exists():
         print("[stop] systemd service not installed — server may still be running")
         return
     result = subprocess.run(
-        ["systemctl", "--user", "stop", "llama-server.service"], capture_output=True, text=True
+        ["systemctl", "--user", "stop", "llama-server.service"],
+        capture_output=True, text=True,
     )
     if result.returncode != 0:
         print(f"[stop] systemctl failed: {result.stderr.strip()}")
+        return
     _clear_state()
+    print("[stop] server stopped ✓")
 
 
 def kill() -> None:
-    """Force-kill the server via systemd (SIGKILL)."""
+    """Force-kill the server via systemd (SIGKILL).
+
+    Sends SIGKILL directly to the process (not systemctl stop) so it dies
+    immediately.  Because the unit file no longer has Restart= on-failure,
+    systemd will not auto-restart the service.
+    """
     if not _systemd_unit_exists():
         print("[kill] systemd service not installed — server may still be running")
         return
@@ -393,30 +411,44 @@ def kill() -> None:
     )
     if result.returncode != 0:
         print(f"[kill] systemctl failed: {result.stderr.strip()}")
+        return
     _clear_state()
+    print("[kill] server killed ✓")
 
 
 def restart(*_args, **_kwargs) -> None:
-    """Restart the server. systemd stops the old process and starts a fresh
-    one, which re-reads ~/.config/llama_light/config.json — so `llama config
-    set <key> <value>` followed by `llama restart` is how settings are applied.
-    """
+    """Restart the server via systemd. Stops the running process and starts
+    a fresh one, which re-reads ~/.config/llama_light/config.json — so
+    'llama config set <key> <value>' then 'llama restart' applies changes."""
     if not _systemd_unit_exists():
         print("[restart] systemd service not installed — cannot restart")
         return
-    subprocess.run(["systemctl", "--user", "stop", "llama-server.service"], check=False)
-    _clear_state()
-    time.sleep(2)
+
+    from .config import get_config
+    cfg = get_config()
+
+    subprocess.run(["systemctl", "--user", "reset-failed", "llama-server.service"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+    print("[restart] restarting server", end="", flush=True)
     result = subprocess.run(
-        ["systemctl", "--user", "start", "llama-server.service"],
-        capture_output=True, text=True,
+        ["systemctl", "--user", "restart", "llama-server.service"],
+        capture_output=True, text=True, timeout=180,
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            "systemctl start failed after restart.\n"
-            f"stderr: {result.stderr.strip()}\n"
-            "Check: journalctl --user -u llama-server -f"
-        )
+        print(f"\n[restart] failed: {result.stderr.strip()}")
+        return
+
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        if _health(cfg.host, cfg.port):
+            print(" ready ✓")
+            status()
+            return
+        print(".", end="", flush=True)
+        time.sleep(0.5)
+    print(" timeout")
+    print("[restart] check: journalctl --user -u llama-server -f")
 
 
 # ── ps ────────────────────────────────────────────────────────────────────────
@@ -666,13 +698,11 @@ def install_service() -> None:
         "After=network.target",
         "",
         "[Service]",
-        "Type=forking",
+        "Type=simple",
         f"ExecStart={llama_bin} _run",
-        f"PIDFile={PID_FILE}",
         "KillMode=control-group",
+        "TimeoutStopSec=10",
         "TimeoutStartSec=300",
-        "Restart=on-failure",
-        "RestartSec=10",
         "Environment=PATH=" + os.path.expanduser("~/.local/bin")
             + ":/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
         "",

@@ -1,8 +1,9 @@
+import json
 import os
 import sys
 import shutil
 import subprocess
-from typing import Optional
+from typing import Optional, Tuple
 
 LLAMA_BIN_LOCATIONS = [
     os.path.join(sys.prefix, "bin"),
@@ -16,6 +17,71 @@ LLAMA_BIN_LOCATIONS = [
     os.path.expanduser("~/anaconda3/bin"),
     os.path.expanduser("~/.pyenv/shims"),
 ]
+
+# ── Cache for locate_main_bin() ──────────────────────────────────────────────
+# Key: resolved llama-server binary path + detected GPU arch.
+# Value: cache dict with "bin", "arch", "ts", "version".
+_CACHE_FILE = os.path.expanduser("~/.cache/llama_light/bincheck.json")
+
+# ── Cache helpers ─────────────────────────────────────────────────────────────
+
+def _cache_load() -> dict | None:
+    """Load cached bincheck result, return None if missing/invalid."""
+    try:
+        with open(_CACHE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _cache_save(data: dict) -> None:
+    """Atomically write cache entry."""
+    os.makedirs(os.path.dirname(_CACHE_FILE), exist_ok=True)
+    fd, tmp = None, _CACHE_FILE + ".tmp"
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT, 0o644)
+        os.write(fd, json.dumps(data).encode())
+        os.fsync(fd)
+        os.close(fd)
+        os.replace(tmp, _CACHE_FILE)
+    except Exception:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _cache_key() -> str:
+    """Build a deterministic key from env / system state that changes when
+    the binary or GPU arch might change.  We intentionally keep this light —
+    only the llama.cpp version and the platform CPU arch are needed, since
+    ensure_binaries() already handles GPU arch matching."""
+    from .__init__ import LLAMA_CPP_VERSION
+    import platform
+    return f"{LLAMA_CPP_VERSION}-{platform.machine()}"
+
+
+def _cache_valid(data: dict | None) -> Tuple[bool, dict | None]:
+    """Return (hit, data) — cache is valid if present, entry is newer than
+    the cached llama.cpp version's build, and the binary still exists."""
+    if data is None:
+        return False, None
+    # Binary must still be executable
+    bin_path = data.get("bin")
+    if bin_path and not _is_executable(bin_path):
+        return False, None
+    # Accept the cache if it's less than 24 h old
+    age = data.get("ts", 0)
+    if age and (int(os.environ.get("_LLAMA_LIGHT_FORCE_BINCHECK", "0"))):
+        return False, None
+    return True, data
+
+
+# ── CUDA / GPU detection ─────────────────────────────────────────────────────
 
 def detect_cuda() -> dict:
     result = {"available": False, "toolkit": False, "driver_version": None, "compute_cap": None}
@@ -68,41 +134,83 @@ def locate_self() -> Optional[str]:
             return full
     return None
 
-def locate_main_bin() -> Optional[str]:
+def locate_main_bin(force: bool = False) -> Optional[str]:
+    """Resolve the llama-server binary path with cached results.
+
+    On the first call (or when *force=True*, or when the cache is stale),
+    performs GPU detection and binary resolution.  Subsequent calls return
+    the cached path immediately — no subprocesses, no nvidia-smi calls.
+
+    Parameters
+    ----------
+    force : bool
+        Skip cache and re-run the full detection pipeline.  Used by
+        ``llama setup`` / ``llama check`` to guarantee fresh results.
+    """
+    # Fast path — return cached result
+    if not force:
+        hit, cached = _cache_valid(_cache_load())
+        if hit:
+            _set_ld_library_path(os.path.dirname(cached["bin"]))
+            return cached["bin"]
+
     from .config import LLAMA_SERVER_BIN
     if LLAMA_SERVER_BIN and _is_executable(LLAMA_SERVER_BIN):
+        _cache_save(_cache_entry(LLAMA_SERVER_BIN))
         return LLAMA_SERVER_BIN
+
     local_build = os.path.expanduser("~/llama.cpp/build/bin/llama-server")
     if _is_executable(local_build):
+        _cache_save(_cache_entry(local_build))
         return local_build
+
     try:
         from .__init__ import LLAMA_CPP_VERSION
         from ._llama_downloader import ensure_binaries
         cache_dir, cache_bin = ensure_binaries(LLAMA_CPP_VERSION)
         if cache_bin and _is_executable(cache_bin):
             _set_ld_library_path(os.path.dirname(cache_bin))
+            _cache_save(_cache_entry(cache_bin))
             return cache_bin
     except Exception:
         pass
+
     try:
         import llama_light
         src_dir = os.path.dirname(llama_light.__file__)
         rel = os.path.abspath(os.path.join(src_dir, "..", "build", "bin", "llama-server"))
         if _is_executable(rel):
+            _cache_save(_cache_entry(rel))
             return rel
         bundled = os.path.abspath(os.path.join(src_dir, "..", "bin", "llama-server"))
         if _is_executable(bundled):
             _set_ld_library_path(os.path.dirname(bundled))
+            _cache_save(_cache_entry(bundled))
             return bundled
     except (ImportError, ModuleNotFoundError):
         pass
+
     for dir_path in LLAMA_BIN_LOCATIONS:
         if not os.path.isdir(dir_path):
             continue
         full = os.path.join(dir_path, "llama-server")
         if _is_executable(full):
+            _cache_save(_cache_entry(full))
             return full
-    return shutil.which("llama-server")
+
+    result = shutil.which("llama-server")
+    if result:
+        _cache_save(_cache_entry(result))
+    return result
+
+
+def _cache_entry(bin_path: str) -> dict:
+    """Build a cache entry from a resolved binary path."""
+    return {
+        "bin": os.path.abspath(bin_path),
+        "arch": f"{_cache_key()}",
+        "ts": int(__import__("time").time()),
+    }
 
 def find_bin(name: str) -> Optional[str]:
     path = shutil.which(name)

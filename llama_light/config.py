@@ -11,6 +11,7 @@ import os
 import platform
 import shutil
 import subprocess
+import tempfile
 from typing import Any, Dict, Optional
 
 # ── Known config keys with their expected types ──────────────────────────────
@@ -228,8 +229,17 @@ class Config:
 
     def save(self) -> None:
         ensure_dirs()
-        with open(GLOBAL_CONFIG, "w") as f:
-            json.dump(self._data, f, indent=2)
+        fd, tmp_path = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self._data, f, indent=2)
+            os.replace(tmp_path, GLOBAL_CONFIG)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
@@ -275,9 +285,6 @@ class Config:
                     f"Key '{key}' requires boolean value "
                     f"(true/false/yes/no/1/0/on/off), got '{value}'"
                 )
-                value = None
-            elif key in _STRING_NONE_KEYS and value.lower() == "none":
-                value = None
 
         self._data[key] = value
         if persist:

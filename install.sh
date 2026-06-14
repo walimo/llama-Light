@@ -239,9 +239,10 @@ Type=forking
 ExecStart=$HOME/.local/bin/llama _run
 PIDFile=$HOME/.cache/llama_light/server.pid
 KillMode=control-group
+KillSignal=SIGKILL
+TimeoutStopSec=5
 TimeoutStartSec=300
-Restart=on-failure
-RestartSec=10
+Restart=no
 Environment=PATH=$HOME/.local/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]

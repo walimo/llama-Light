@@ -10,7 +10,7 @@ from typing import Dict, Optional
 from .server import (
     chat_messages, kill, logs, ps, restart, start, status, stop,
     install_service, uninstall_service,
-    _read_state, _is_running, _pid, _base_url, _is_healthy,
+    _read_state, _is_running, _pid, _base_url, _is_healthy, _health,
 )
 from .model_manager import pull, ls, rm
 from .config import (
@@ -22,7 +22,113 @@ from ._bincheck import check, status as _bincheck_status
 from ._backup import backup, restore, list_backups
 from ._llama_downloader import ensure_binaries, check_version
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
+
+# ── Banner ────────────────────────────────────────────────────────────────────
+
+def _banner() -> None:
+    """Print a clean, professional help screen."""
+    DIM   = "\033[2m"
+    BOLD  = "\033[1m"
+    CYAN  = "\033[36m"
+    WHITE = "\033[97m"
+    RESET = "\033[0m"
+
+    logo = f"""\
+{CYAN}  ██╗     ██╗      █████╗  ███╗   ███╗  █████╗ {RESET}
+{CYAN}  ██║     ██║     ██╔══██╗ ████╗ ████║ ██╔══██╗{RESET}
+{CYAN}  ██║     ██║     ███████║ ██╔████╔██║ ███████║{RESET}
+{CYAN}  ██║     ██║     ██╔══██║ ██║╚██╔╝██║ ██╔══██║{RESET}
+{CYAN}  ███████╗███████╗██║  ██║ ██║ ╚═╝ ██║ ██║  ██║{RESET}
+{CYAN}  ╚══════╝╚══════╝╚═╝  ╚═╝ ╚═╝     ╚═╝ ╚═╝  ╚═╝{RESET}"""
+
+    def section(icon, title):
+        bar = "─" * 51
+        return f"\n  {CYAN}{icon}{RESET}  {BOLD}{WHITE}{title}{RESET}  {DIM}{bar}{RESET}"
+
+    def cmd(name, desc, width=18):
+        return f"    {BOLD}{name:<{width}}{RESET}{DIM}{desc}{RESET}"
+
+    print(logo)
+    print(f"\n  {BOLD}llama-Light{RESET} {DIM}v{VERSION}  —  one-command LLM server · auto CUDA{RESET}")
+    print(f"  {DIM}usage: llama <command> [options]   ·   llama <command> -h for flags{RESET}")
+
+    print(section("◈", "SERVER"))
+    print(cmd("start",   "Start llama-server via systemd, waits until healthy"))
+    print(cmd("stop",    "Gracefully stop the running server"))
+    print(cmd("restart", "Stop, clear state, start fresh — reloads config.json"))
+    print(cmd("kill",    "Force-kill the server process with SIGKILL"))
+    print(cmd("status",  "Show PID, health, model, address, GPU layers, uptime"))
+    print(cmd("ps",      "Process table — all running servers with resource usage"))
+    print(cmd("logs",    "Tail the server log  [-n N  lines, default 40]"))
+
+    print(section("◈", "CHAT & INFERENCE"))
+    print(cmd("run",            "Send a single prompt and print the response"))
+    print(cmd("chat",           "Start an interactive multi-turn chat session"))
+    print(cmd("hermes",         "Launch Hermes TUI wired to the local model"))
+    print(cmd("hermes-desktop", "Launch Hermes Electron desktop application"))
+    print(cmd("claude",         "Launch Claude Code CLI pointed at the local model"))
+
+    print(section("◈", "MODEL MANAGEMENT"))
+    print(cmd("pull",  "Download a GGUF file from a Hugging Face repo"))
+    print(cmd("ls",    "List all downloaded models in the local cache"))
+    print(cmd("rm",    "Remove a model from the registry and disk"))
+
+    print(section("◈", "CONFIGURATION"))
+    print(cmd("config show",          "Print all current settings (global + per-model)"))
+    print(cmd("config set <k> <v>",   "Set a global config key (e.g. temperature, ngl)"))
+    print(cmd("config set --model",   "Set a per-model override (persists per model name)"))
+    print(cmd("config backup",        "Snapshot current config.json (10-file rotation)"))
+    print(cmd("config restore",       "Restore config from a snapshot  [--path / --latest]"))
+    print(cmd("config list-backups",  "List all available config snapshots"))
+
+    print(section("◈", "LLAMA.CPP TOOLS"))
+    print(cmd("quantize",         "Quantize a model to a smaller format"))
+    print(cmd("bench",            "Benchmark prompt and generation throughput"))
+    print(cmd("perplexity",       "Compute perplexity score for a dataset"))
+    print(cmd("cli",              "Drop into the interactive llama.cpp CLI"))
+    print(cmd("gguf",             "Inspect GGUF file header and metadata"))
+    print(cmd("gguf-split",       "Split a large GGUF model into shards"))
+    print(cmd("tokenize",         "Tokenize a text string and show token IDs"))
+    print(cmd("export-lora",      "Export a LoRA adapter to GGUF format"))
+    print(cmd("imatrix",          "Compute an importance matrix for quantization"))
+    print(cmd("embedding",        "Run an embedding model and return vectors"))
+    print(cmd("parallel",         "Benchmark parallel multi-slot inference"))
+    print(cmd("speculative",      "Benchmark speculative decoding performance"))
+    print(cmd("lookahead",        "Benchmark look-ahead decoding performance"))
+    print(cmd("cvector-generator","Generate context vectors for steering"))
+
+    print(section("◈", "SYSTEM"))
+    print(cmd("service",  "Show, install, stop, or remove the systemd user service"))
+    print(cmd("info",     "Show environment: Python, platform, GPU, binary paths"))
+    print(cmd("setup",    "Download and verify llama.cpp binaries for your GPU"))
+    print(cmd("check",    "Check llama-server binary version and CUDA support"))
+    print(cmd("webui",    "Open the llama.cpp chat web UI in your browser"))
+    print(cmd("version",  "Print llama-Light version and exit"))
+    print()
+
+
+# ── Custom Help Formatter ─────────────────────────────────────────────────────
+
+class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Strips the auto-generated 'positional arguments:' block so the custom
+    description (which already lists all subcommands) is the single source of truth."""
+
+    def format_help(self):
+        text = super().format_help()
+        lines = text.split('\n')
+        result = []
+        skip = False
+        for line in lines:
+            if line == 'positional arguments:':
+                skip = True
+                continue
+            if skip:
+                if not line or line.startswith('  '):
+                    continue
+                skip = False
+            result.append(line)
+        return '\n'.join(result)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -50,10 +156,10 @@ def _resolve_model_arg(args: argparse.Namespace) -> Optional[str]:
     return m  # let server.start() give the error
 
 
-def _ensure_server_or_start(args: argparse.Namespace) -> None:
+def _ensure_server_or_start(args: argparse.Namespace) -> bool:
     pid = _pid()
     if _is_running(pid):
-        return
+        return True
 
     from .server import _systemd_unit_exists
     cfg = get_config()
@@ -63,12 +169,13 @@ def _ensure_server_or_start(args: argparse.Namespace) -> None:
         subprocess.run(["systemctl", "--user", "start", "llama-server.service"])
         deadline = time.time() + 180
         while time.time() < deadline:
-            if _is_healthy(cfg.host, cfg.port):
+            if _health(cfg.host, cfg.port):
                 return
-            time.sleep(1)
+            print(".", end="", flush=True)
+            time.sleep(0.5)
         print("[warn] server did not become healthy in time — "
               "check: journalctl --user -u llama-server -f")
-        return
+        return False
 
     # No systemd unit installed — direct start (dev / no-systemd fallback)
     model = getattr(args, "model", None) or cfg.default_model or cfg.last_model
@@ -118,29 +225,54 @@ def _print_server_env(env: Dict[str, str]) -> None:
 
 def cmd_start(_args):
     """Start llama-server via systemd (reads all settings from config.json)."""
-    from .server import _systemd_unit_exists
+    from .server import _systemd_unit_exists, status, _detect_port_in_use
     if not _systemd_unit_exists():
         print("[error] systemd service not installed.")
-        print("  Re-run install.sh, or: llama service --install")
+        print("  Re-run install.sh, or: llama service install")
         sys.exit(1)
 
-    subprocess.run(["systemctl", "--user", "start", "llama-server.service"])
-
     cfg = get_config()
+
+    # Clear any failed state left by a previous kill/crash
+    subprocess.run(
+        ["systemctl", "--user", "reset-failed", "llama-server.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+
+    # Wait for port to free before starting (up to 10s)
+    deadline = time.time() + 10
+    while _detect_port_in_use(host=cfg.host, port=cfg.port):
+        if time.time() > deadline:
+            break
+        time.sleep(0.2)
+
+    subprocess.run(
+        ["systemctl", "--user", "start", "llama-server.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
     print("[start] waiting for server", end="", flush=True)
     deadline = time.time() + 180
+    tick = 0
     while time.time() < deadline:
-        if _is_healthy(cfg.host, cfg.port):
+        tick += 1
+        # First 5s: quick polls (2s timeout) — server is booting
+        # After 5s: relaxed polls (3s timeout) — waiting for model load
+        if _health(cfg.host, cfg.port):
             print(" ready ✓")
+            status()
             return
         print(".", end="", flush=True)
-        time.sleep(1)
+        time.sleep(0.5)
     print(" timeout")
     print("[start] check: journalctl --user -u llama-server -f")
+    sys.exit(1)
 
 
 def cmd_run_server(args):
-    """Internal systemd launcher (llama _run). Resolves model, starts server."""
+    """Internal systemd launcher (llama _run). Resolves model, starts server,
+    then blocks until it exits — Type=simple tracks *this* process as the
+    service's main PID, so it must stay alive as long as llama-server does."""
     cfg = get_config()
     model = cfg.default_model or cfg.last_model
     if not model:
@@ -148,8 +280,11 @@ def cmd_run_server(args):
         sys.exit(1)
     args.model = model
     model_path = _resolve_model_arg(args)
-    start(model_path=model_path, **_resolve_server_args(args))
+    pid = start(model_path=model_path, **_resolve_server_args(args))
     cfg.set("last_model", model_path)
+
+    while _is_running(pid):
+        time.sleep(2)
 
 
 def cmd_stop(_args):
@@ -168,7 +303,7 @@ def cmd_restart(_args):
 
 
 def cmd_run(args):
-    _ensure_server_or_start(args)
+    if not _ensure_server_or_start(args): return
     msgs   = []
     system = getattr(args, "system", None)
     if system:
@@ -181,7 +316,7 @@ def cmd_run(args):
 
 
 def cmd_chat(args):
-    _ensure_server_or_start(args)
+    if not _ensure_server_or_start(args): return
     system   = getattr(args, "system", None)
     if system is None:
         system = _CHAT_SYSTEM
@@ -253,7 +388,7 @@ def _inline_persona_chat(args, system: str) -> None:
     args.system = system
     if getattr(args, "prompt", None):
         # single-shot: just run without starting server twice
-        _ensure_server_or_start(args)
+        if not _ensure_server_or_start(args): return
         msgs = [{"role": "system", "content": system},
                 {"role": "user",   "content": args.prompt}]
         for tok in chat_messages(msgs, **_resolve_gen_args(args)):
@@ -270,7 +405,7 @@ def cmd_hermes(args):
     Exits with an error if the ``hermes`` binary is not installed.
     --prompt : single-shot reply (no TUI).
     """
-    _ensure_server_or_start(args)
+    if not _ensure_server_or_start(args): return
 
     if getattr(args, "prompt", None):
         _inline_persona_chat(args, _HERMES_SYSTEM)
@@ -306,9 +441,7 @@ def cmd_hermes_desktop(args):
 
     Exits with an error if ``hermes`` is not installed.
     """
-    import shutil
-
-    _ensure_server_or_start(args)
+    if not _ensure_server_or_start(args): return
     env = _server_env()
     cfg = get_config()
     host = _read_state().get("host", cfg.host)
@@ -342,7 +475,7 @@ def cmd_claude(args):
     ANTHROPIC_API_KEY is set to a dummy value so Claude Code skips
     interactive login and uses the local OpenAI-compatible endpoint.
     """
-    _ensure_server_or_start(args)
+    if not _ensure_server_or_start(args): return
     env = _server_env()
     cfg = get_config()
 
@@ -388,16 +521,20 @@ def cmd_tool(args):
 
     # Map subcommand to the actual llama.cpp binary
     tool_map = {
-        "quantize":   "llama-quantize",
-        "bench":      "llama-bench",
-        "perplexity": "llama-perplexity",
-        "cli":        "llama-cli",
-        "gguf-split": "llama-gguf-split",
-        "tokenize":   "llama-tokenize",
-        "gguf":       "llama-gguf",
-        "export-lora":"llama-export-lora",
-        "imatrix":    "llama-imatrix",
-        "embedding":  "llama-embedding",
+        "quantize":        "llama-quantize",
+        "bench":           "llama-bench",
+        "perplexity":      "llama-perplexity",
+        "cli":             "llama-cli",
+        "gguf-split":      "llama-gguf-split",
+        "tokenize":        "llama-tokenize",
+        "gguf":            "llama-gguf",
+        "export-lora":     "llama-export-lora",
+        "imatrix":         "llama-imatrix",
+        "embedding":       "llama-embedding",
+        "parallel":        "llama-parallel",
+        "speculative":     "llama-speculative",
+        "lookahead":       "llama-lookahead",
+        "cvector-generator": "llama-cvector-generator",
     }
 
     tool = tool_map.get(args.command)
@@ -521,16 +658,25 @@ def cmd_config_set(args):
     model = getattr(args, "model", None)
     if model:
         from .per_model import update_model_config, _model_name_from_path
-        from .config import _INT_KEYS, _FLOAT_KEYS, _BOOL_KEYS
+        from .config import _INT_KEYS, _FLOAT_KEYS, _BOOL_KEYS, _STRING_NONE_KEYS
         resolved = _resolve_model_arg(args) if model != "auto" else None
+        if model == "auto" and not resolved:
+            print(f"[error] model 'auto' not found. Provide an explicit model path or name.", file=sys.stderr)
+            sys.exit(1)
         name = _model_name_from_path(resolved) if resolved else model
         value = args.value
-        if args.key in _INT_KEYS:
-            value = int(value)
-        elif args.key in _FLOAT_KEYS:
-            value = float(value)
-        elif args.key in _BOOL_KEYS:
-            value = value.lower() in ("true", "1", "yes", "on")
+        try:
+            if args.key in _INT_KEYS:
+                value = int(value)
+            elif args.key in _FLOAT_KEYS:
+                value = float(value)
+            elif args.key in _BOOL_KEYS:
+                value = value.lower() in ("true", "1", "yes", "on")
+            elif args.key in _STRING_NONE_KEYS and value.lower() == "none":
+                value = None
+        except ValueError as e:
+            print(f"[error] {e}", file=sys.stderr)
+            sys.exit(1)
         update_model_config(name, args.key, value)
         print(f"[config] [{name}] {args.key} = {value}")
     else:
@@ -559,12 +705,13 @@ def cmd_config_restore(args):
 
 def cmd_webui(args):
     """Open llama.cpp's built-in web UI in browser."""
-    _ensure_server_or_start(args)
+    if not _ensure_server_or_start(args): return
+    from urllib.parse import quote
     state = _read_state()
     port = state.get("port", 8080)
     host = state.get("host", "127.0.0.1")
     url = f"http://{host}:{port}"
-    sys_param = _WEBUI_SYSTEM.replace(" ", "%20")
+    sys_param = quote(_WEBUI_SYSTEM, safe='')
     url += "?system=" + sys_param
     print(f"[webui] opening {url}")
     try:
@@ -594,7 +741,7 @@ def cmd_service(args):
 
     # ── Read-only status (bare) ────────────────────────────────────────────────
 
-    if sub is None:
+    if sub is None or sub == "show":
         svc_path = _service_path()
         print(f"[service] systemd unit : {svc_path}")
         print(f"  exists              : {'yes' if os.path.exists(svc_path) else 'no'}")
@@ -771,90 +918,136 @@ def cmd_check(args):
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser with polished help text."""
+    desc = (
+        "Server Management\n"
+        "  start       Start llama-server (systemd)\n"
+        "  stop        Stop the server\n"
+        "  kill        Force-kill the server (SIGKILL)\n"
+        "  restart     Restart — reloads config.json\n"
+        "  status      Show server status\n"
+        "  ps          Show running server table\n"
+        "  logs        Tail server log\n\n"
+        "Chat & Interaction\n"
+        "  run           One-shot prompt\n"
+        "  chat          Interactive chat loop\n"
+        "  hermes        Launch Hermes TUI wired to local model\n"
+        "  hermes-desktop  Launch Hermes Electron desktop\n"
+        "  claude        Launch Claude Code CLI with local model\n\n"
+        "Model Management\n"
+        "  pull  Download a GGUF from HuggingFace\n"
+        "  ls    List downloaded models\n"
+        "  rm    Remove a model\n\n"
+        "Configuration\n"
+        "  config  Get/set configuration\n\n"
+        "LLaMA.cpp Tools\n"
+        "  quantize          Quantize model\n"
+        "  bench             Benchmark throughput\n"
+        "  perplexity        Perplexity test\n"
+        "  cli               Interactive CLI\n"
+        "  gguf-split        Split model into shards\n"
+        "  tokenize          Tokenize text\n"
+        "  gguf              Inspect GGUF header\n"
+        "  export-lora       Export LoRA adapter\n"
+        "  imatrix           Compute importance matrix\n"
+        "  embedding         Run embedding model\n"
+        "  parallel          Parallel processing benchmark\n"
+        "  speculative       Speculative decoding benchmark\n"
+        "  lookahead         Look-ahead decoding benchmark\n"
+        "  cvector-generator Generate context vectors\n\n"
+        "System\n"
+        "  service   Manage systemd user service\n"
+        "  info      Show environment info\n"
+        "  setup     Download/verify binaries\n"
+        "  check     Check binary version\n"
+        "  webui     Open web UI in browser\n"
+        "  version   Show version\n"
+    )
     parser = argparse.ArgumentParser(
         prog='llama',
-        description='llama-Light — Ollama-style llama.cpp wrapper',
+        description=desc,
+        formatter_class=_HelpFormatter,
     )
-    sub = parser.add_subparsers(dest='command', required=True)
+    # Override format_help() to show a clean usage line without all subcommands
+    _orig_format_help = parser.format_help
+    def _format_help():
+        text = _orig_format_help()
+        lines = text.split('\n')
+        result = []
+        skip_block = False
+        for line in lines:
+            if line == 'usage: llama [-h]' or line.strip().startswith('{start,stop,') or line.strip() == '...':
+                skip_block = True
+                continue
+            if skip_block:
+                skip_block = False
+                continue
+            result.append(line)
+        result.insert(0, 'usage: llama <command> [options]\n')
+        return '\n'.join(result)
+    parser.format_help = _format_help
+    sub = parser.add_subparsers(dest='command')
+    sub.required = False
+    sub.default = None
 
-    # start / restart
-    sub.add_parser('start',   help='Start llama-server (systemd)').set_defaults(func=cmd_start)
+    # ── Server Lifecycle ──
+    sub.add_parser('start', help='Start llama-server (systemd)').set_defaults(func=cmd_start)
+    sub.add_parser('stop', help='Stop the server').set_defaults(func=cmd_stop)
+    sub.add_parser('kill', help='Force-kill the server (SIGKILL)').set_defaults(func=cmd_kill)
     sub.add_parser('restart', help='Restart — reloads config.json').set_defaults(func=cmd_restart)
+    sub.add_parser('status', help='Show server status').set_defaults(func=cmd_status)
+    sub.add_parser('ps', help='Show running server table').set_defaults(func=cmd_ps)
+    p_logs = sub.add_parser('logs', help='Tail server log')
+    p_logs.add_argument('--lines', '-n', type=int, default=40)
+    p_logs.set_defaults(func=cmd_logs)
 
-    # hidden internal launcher — invoked only by systemd's ExecStart
+    # Hidden internal launcher
     p_run = sub.add_parser('_run', help=argparse.SUPPRESS)
     _server_args(p_run)
     p_run.set_defaults(func=cmd_run_server)
 
-    # stop / kill
-    sub.add_parser('stop', help='Stop (systemd)').set_defaults(func=cmd_stop)
-    sub.add_parser('kill', help='Force-kill (systemd, SIGKILL)').set_defaults(func=cmd_kill)
-
-    # setup / check
-    sub.add_parser('setup', help='Download/verify llama.cpp binaries').set_defaults(func=cmd_setup)
-    sub.add_parser('check', help='Check binary version status').set_defaults(func=cmd_check)
-
-    # run — single-shot prompt
+    # ── Chat & Interaction ──
     p = sub.add_parser('run', help='One-shot prompt')
     _server_args(p)
     _gen_args(p)
     p.add_argument('--prompt', required=True)
     p.set_defaults(func=cmd_run)
 
-    # chat — interactive loop
     p = sub.add_parser('chat', help='Interactive chat loop')
     _server_args(p)
     _gen_args(p)
     p.set_defaults(func=cmd_chat)
 
-    # hermes
     p = sub.add_parser('hermes', help='Launch Hermes TUI wired to local model')
     _server_args(p)
     _gen_args(p)
     p.add_argument('--prompt', default=None)
     p.set_defaults(func=cmd_hermes)
 
-    # hermes-desktop
-    p = sub.add_parser('hermes-desktop', help='Launch Hermes Electron desktop app')
+    p = sub.add_parser('hermes-desktop', help='Launch Hermes Electron desktop')
     _server_args(p)
     p.set_defaults(func=cmd_hermes_desktop)
 
-    # claude
     p = sub.add_parser('claude', help='Launch Claude Code CLI with local model')
     _server_args(p)
     _gen_args(p)
     p.add_argument('--prompt', default=None)
     p.set_defaults(func=cmd_claude)
 
-    # pull / ls / rm
-    p = sub.add_parser('pull', help='Download a GGUF from Hugging Face')
-    p.add_argument('--repo',     required=True)
-    p.add_argument('--file',     required=True)
+    # ── Model Management ──
+    p = sub.add_parser('pull', help='Download a GGUF from HuggingFace')
+    p.add_argument('--repo', required=True)
+    p.add_argument('--file', required=True)
     p.add_argument('--model-id', default=None, dest='model_id')
     p.set_defaults(func=cmd_pull)
 
     sub.add_parser('ls', help='List downloaded models').set_defaults(func=cmd_ls)
+    p_rm = sub.add_parser('rm', help='Remove a model')
+    p_rm.add_argument('model_id')
+    p_rm.add_argument('--file', default=None)
+    p_rm.set_defaults(func=cmd_rm)
 
-    p = sub.add_parser('rm', help='Remove a model')
-    p.add_argument('model_id')
-    p.add_argument('--file', default=None)
-    p.set_defaults(func=cmd_rm)
-
-    # server info
-    sub.add_parser('ps',     help='Show running server table').set_defaults(func=cmd_ps)
-    sub.add_parser('status', help='Show server status').set_defaults(func=cmd_status)
-
-    p = sub.add_parser('logs', help='Tail server log')
-    p.add_argument('--lines', '-n', type=int, default=40)
-    p.set_defaults(func=cmd_logs)
-
-    sub.add_parser('version').set_defaults(func=cmd_version)
-    sub.add_parser('info',    help='Show llama-Light environment info').set_defaults(func=cmd_info)
-
-    # webui
-    sub.add_parser('webui', help='Open llama.cpp web UI in browser').set_defaults(func=cmd_webui)
-
-    # config
+    # ── Configuration ──
     p_cfg = sub.add_parser('config', help='Get/set configuration')
     cfg_sub = p_cfg.add_subparsers(dest='config_cmd', required=True)
     cfg_sub.add_parser('show').set_defaults(func=cmd_config_show)
@@ -870,37 +1063,54 @@ def build_parser() -> argparse.ArgumentParser:
     p_set.add_argument('--model', default=None)
     p_set.set_defaults(func=cmd_config_set)
 
-    # tools — llama.cpp CLI wrappers
-    for cmd, desc in [
-        ('quantize',   'Quantize model'),
-        ('bench',      'Benchmark throughput'),
+    # ── Tools ──
+    for cmd, desc_tool in [
+        ('quantize', 'Quantize model'),
+        ('bench', 'Benchmark throughput'),
         ('perplexity', 'Perplexity test'),
-        ('cli',        'Interactive CLI'),
+        ('cli', 'Interactive CLI'),
         ('gguf-split', 'Split model into shards'),
-        ('tokenize',   'Tokenize text'),
-        ('gguf',       'Inspect GGUF header'),
-        ('export-lora','Export LoRA adapter'),
-        ('imatrix',    'Compute importance matrix'),
-        ('embedding',  'Run embedding model'),
+        ('tokenize', 'Tokenize text'),
+        ('gguf', 'Inspect GGUF header'),
+        ('export-lora', 'Export LoRA adapter'),
+        ('imatrix', 'Compute importance matrix'),
+        ('embedding', 'Run embedding model'),
+        ('parallel', 'Parallel processing benchmark'),
+        ('speculative', 'Speculative decoding benchmark'),
+        ('lookahead', 'Look-ahead decoding benchmark'),
+        ('cvector-generator', 'Generate context vectors'),
     ]:
-        p = sub.add_parser(cmd, help=desc)
-        p.add_argument('args', nargs=argparse.REMAINDER, help='Pass-through to llama.cpp tool')
+        p = sub.add_parser(cmd, help=desc_tool)
+        p.add_argument('args', nargs=argparse.REMAINDER)
         p.set_defaults(func=cmd_tool)
 
-    # ── Service Management ───────────────────────────────────────────────────
-
+    # ── System ──
     p_svc = sub.add_parser('service', help='Manage systemd user service')
     svc_sub = p_svc.add_subparsers(dest='service_cmd', required=False)
+    svc_sub.add_parser('show', help='Show service status and config').set_defaults(func=cmd_service)
     svc_sub.add_parser('install', help='Install service unit file').set_defaults(func=cmd_service)
     svc_sub.add_parser('stop', help='Stop the service').set_defaults(func=cmd_service)
     svc_sub.add_parser('remove', help='Uninstall service').set_defaults(func=cmd_service)
     p_svc.set_defaults(func=cmd_service)
 
+    sub.add_parser('info', help='Show environment info').set_defaults(func=cmd_info)
+    sub.add_parser('setup', help='Download/verify binaries').set_defaults(func=cmd_setup)
+    sub.add_parser('check', help='Check binary version').set_defaults(func=cmd_check)
+    sub.add_parser('webui', help='Open web UI in browser').set_defaults(func=cmd_webui)
+    sub.add_parser('version', help='Show version').set_defaults(func=cmd_version)
+
     return parser
 
 
 def main():
-    args = build_parser().parse_args()
+    if len(sys.argv) == 2 and sys.argv[1] in ('-h', '--help'):
+        _banner()
+        return
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.command is None:
+        _banner()
+        return
     try:
         args.func(args)
     except RuntimeError as e:

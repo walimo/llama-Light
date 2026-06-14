@@ -6,7 +6,7 @@ from .server import (
 )
 from .model_manager import pull, ls, rm
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 LLAMA_CPP_VERSION = "b9596"
 
 __all__ = [
