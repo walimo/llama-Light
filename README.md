@@ -9,7 +9,7 @@
 - **Hardware auto‑detection**: GPU, CPU → `cache_type`, `ngl`, `threads`
 - **Model registry**: scans Hugging Face cache, OCI manifests + blobs
 - **Multi‑model runner**: each model on its own port
-- **Systemd service**: auto‑start at boot
+- **Systemd service**: `install.sh` auto-creates user service; `llama start/stop/restart` auto-detect systemd and delegate when active
 - **Personas**: `claude`, `hermes`, `hermes-desktop` with no sandbox, no login prompt
 - **Smart per‑model config**: auto‑detected defaults for reasoning models, user overrides persist per-model
 - **Token‑efficient defaults**: low temperature, tight top-p, repetition penalties for Opus/Anthropic-like behaviour
@@ -21,21 +21,21 @@
 ## Installation
 
 ```bash
-pipx install llama_light-0.2.0-py3-none-any.whl   # recommended
-# or: pip install --user llama_light-0.2.0-py3-none-any.whl
+pip install llama-light  # latest from PyPI
+# or: pip install .  # from source directory
 ```
 
-Prerequisite: `llama-server` at `~/llama.cpp/build/bin/llama-server` (adjustable in `config.py`).
+Prerequisite: NVIDIA driver with `nvidia-smi` available. The installer auto-detects CUDA version and GPU architecture.
 
 ## Quick Start
 
 ```bash
-llama config show
-llama config set default_model ~/models/llama-2-7b.Q4_K_M.gguf
+llama config set default_model ~/models/Opus4.8.gguf
 llama start
 llama run --prompt "Explain quantum computing"
-llama claude
+llama chat
 llama ps
+llama service        # show systemd unit status
 llama stop
 ```
 
@@ -43,33 +43,56 @@ llama stop
 
 | Command | Description |
 |---------|-------------|
-| `llama start [--model ...]` | Start llama‑server (uses default/last model) |
-| `llama stop` | Stop server (SIGTERM) |
-| `llama kill` | Force‑kill (SIGKILL) |
-| `llama restart` | Stop then start |
-| `llama run --prompt "..."` | Single prompt (auto‑starts server) |
-| `llama chat` | Interactive multi‑turn chat |
+| `llama start [--model ...]` | Start server (reads config, resolves model) |
+| `llama stop` | Stop server (SIGTERM or systemd) |
+| `llama kill` | Force-kill server (SIGKILL or systemd) |
+| `llama restart` | Restart server (systemd or direct) |
+| `llama run --prompt "..."` | Single prompt (auto-starts server) |
+| `llama chat` | Interactive multi-turn chat |
 | `llama hermes` | Chat with Hermes persona |
-| `llama claude` | Chat with Claude persona |
 | `llama hermes-desktop` | Launch Hermes Electron desktop app |
+| `llama claude` | Chat with Claude persona |
 | `llama pull --repo <repo> --file <file>` | Download GGUF from HuggingFace |
 | `llama ls` | List cached GGUF models (scans HF cache) |
 | `llama rm <name>` | Remove model from registry and disk |
-| `llama ps` | Enhanced process list (PID, ctx, ngl, batch, threads, flash, uptime) |
-| `llama status` | Verbose status (PID, health, log path) |
+| `llama ps` | Server table (PID, ctx, ngl, batch, GPU VRAM, uptime) |
+| `llama status` | Verbose status (PID, health, model, log) |
 | `llama logs [-n N]` | Tail server log |
-| `llama config show` | Show all current settings |
-| `llama config set <key> <value>` | Set a config key (persists) |
-| `llama config set --model <name> <key> <value>` | Save per-model setting |
-| `llama config backup` | Snapshot current config with timestamp |
-| `llama config restore` | Restore latest backup |
-| `llama config restore --path <file>` | Restore specific backup |
-| `llama config list-backups` | List all available backups |
-| `llama webui` | Open llama.cpp chat UI in browser |
-| `llama info` | System info (Python, platform, binary, cache, models) |
-| `llama service install --model <path>` | Install systemd user service |
-| `llama service remove` | Remove systemd service |
+| `llama service` | Show systemd unit path, content, status, config defaults |
+| `llama service install` | Install systemd user service |
+| `llama service stop` | Stop the systemd service |
+| `llama service remove` | Uninstall the systemd service |
 | `llama version` | Show version |
+| `llama info` | System info (Python, platform, binary, cache) |
+| `llama webui` | Open llama.cpp chat UI in browser |
+| `llama config show` | Show all settings |
+| `llama config set <key> <value>` | Set a global config key |
+| `llama config set --model <name> <key> <value>` | Save per-model setting |
+| `llama config backup` | Snapshot current config |
+| `llama config restore [--path <file>]` | Restore config |
+| `llama config list-backups` | List available backups |
+| `llama quantize [args]` | Quantize model |
+| `llama bench [args]` | Benchmark throughput |
+| `llama perplexity [args]` | Perplexity test |
+| `llama cli [args]` | Interactive CLI |
+| `llama gguf-split [args]` | Split model into shards |
+| `llama tokenize [args]` | Tokenize text |
+| `llama gguf [args]` | Inspect GGUF header |
+| `llama export-lora [args]` | Export LoRA adapter |
+| `llama imatrix [args]` | Compute importance matrix |
+| `llama embedding [args]` | Run embedding model |
+
+## Dual-Mode Start / Stop / Restart
+
+`start`, `stop`, `kill`, and `restart` are **dual-mode**:
+
+- If the **systemd unit exists** → delegate to `systemctl --user`
+- If **systemd not active** → use direct signal (SIGTERM/SIGKILL)
+
+This means:
+- Running `llama start` works whether or not systemd is installed
+- Running `llama service install` creates the unit file
+- After that, `llama start` delegates to systemd automatically
 
 ## Smart Per‑Model Configuration
 
@@ -77,10 +100,10 @@ Every model you load gets auto‑detected defaults based on its family:
 
 | Model family | temperature | top_k | top_p | freq_penalty | presence_penalty | max_tokens |
 |---|---|---|---|---|---|---|
-| **opus** (opus‑*, claude‑*) | 0.1 | 1 | 0.1 | 0.2 | 0.1 | 8192 |
-| **claude** (claude‑*) | 0.1 | 1 | 0.1 | 0.3 | 0.2 | 8192 |
-| **codellama** (codellama‑*) | 0.1 | 1 | 0.1 | 0.3 | 0.2 | 4096 |
-| **qwen** (qwen‑*, qwen2*‑*) | 0.1 | 1 | 0.1 | 0.2 | 0.1 | 8192 |
+| **opus** (opus‑\*, claude‑\*) | 0.1 | 1 | 0.1 | 0.2 | 0.1 | 8192 |
+| **claude** (claude‑\*) | 0.1 | 1 | 0.1 | 0.3 | 0.2 | 8192 |
+| **codellama** (codellama‑\*) | 0.1 | 1 | 0.1 | 0.3 | 0.2 | 4096 |
+| **qwen** (qwen‑\*, qwen2\*‑\*) | 0.1 | 1 | 0.1 | 0.2 | 0.1 | 8192 |
 | **default** (everything else) | 0.7 | 40 | 0.95 | 0.0 | 0.0 | 2048 |
 
 These settings produce **Opus/Anthropic‑like** behaviour: clear, concise, deterministic answers with minimal wasted tokens.
@@ -103,10 +126,19 @@ All settings live in `~/.config/llama_light/`:
 | Path | Purpose |
 |------|---------|
 | `config.json` | Global settings (server, host, port, hardware defaults) |
-| `models/<model>.json` | Per‑model settings (auto‑created on first customisation) |
+| `models/<model>.json` | Per‑model settings (auto-created on first customisation) |
 | `registry.json` | Model registry (HF cache + local) |
 
-See `CONFIG.md` for all 50+ configuration keys.
+## systemd Service
+
+The systemd service is auto-created by `install.sh`. It:
+- Runs `llama start` as the ExecStart command
+- Uses `Type=forking` + `PIDFile=` for process tracking
+- Has `KillMode=control-group` for clean shutdown
+- Has `Restart=on-failure` with 10s delay
+- Uses `TimeoutStartSec=90` for model loading
+
+To change settings: `llama config set <key> <value>` then `llama restart`.
 
 ## Performance vs Ollama
 
@@ -125,23 +157,23 @@ Core files:
 
 - `_cli.py` — all CLI commands (argparse)
 - `config.py` — hardware detection + persistent JSON config
-- `server.py` — spawns/kills llama‑server, health checks, streaming chat
+- `server.py` — spawns/kills llama‑server, health checks, streaming chat, systemd helpers
 - `model_manager.py` + `registry.py` — model registry, HF cache scanning
-- `per_model.py` — per‑model config auto‑detection and merge
-- `_bincheck.py` — robust binary detection (hermes, claude, hermes-desktop)
+- `per_model.py` — per-model config auto-detection and merge
+- `_bincheck.py` — robust binary detection
 
 To extend:
 
 - Add CLI command: handler in `_cli.py` + parser in `build_parser()`.
 - Add config key: edit `get_defaults()` in `config.py`.
 - Add `llama-server` flag: pass in `start()` using `cfg.get("key")`.
-- Add auto‑tuning: modify `get_defaults()` in `config.py`.
+- Add auto-tuning: modify `get_defaults()` in `config.py`.
 - Add persona: copy `cmd_claude` pattern, change system prompt.
 
 State stored in:
 
 - `~/.cache/llama_light/` — logs, runners, state
-- `~/.config/llama_light/` — config, per‑model settings, registry
+- `~/.config/llama_light/` — config, per-model settings, registry
 
 ## License
 

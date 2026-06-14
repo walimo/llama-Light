@@ -145,6 +145,15 @@ def start(
             "Run 'llama stop' first."
         )
 
+    # Guard: if the target port is already bound, the child will fail to
+    # start, die immediately, and raise a confusing "process died" error.
+    # Check the port upfront so the user gets a clear message.
+    if _detect_port_in_use(host=host, port=port):
+        raise RuntimeError(
+            f"Port {port} is already in use. "
+            "Run 'llama stop' first, or specify a different port with --port."
+        )
+
     log_file = os.path.join(LOG_DIR, "server.log")
 
     # pull full config so all keys are wired through
@@ -309,7 +318,6 @@ def start(
             args,
             stdout=log, stderr=log,
             stdin=subprocess.DEVNULL,
-            start_new_session=True,
         )
         proc_ref[0] = proc
 
