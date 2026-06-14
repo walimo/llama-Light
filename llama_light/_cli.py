@@ -541,25 +541,75 @@ def cmd_webui(args):
 
 
 def cmd_service(args):
-    """Install or uninstall the llama-server systemd service.
+    """Manage the llama-server systemd service.
 
-    Use `llama start` / `llama stop` / `llama restart` for day-to-day
-    management. Use `llama service` for service lifecycle only.
+    Usage:
+        llama service              → show unit file, systemd status, model config
+        llama service install      → create unit file, enable (backward compat)
+        llama service stop         → stop the service
+        llama service remove       → stop, disable, uninstall
     """
-    from .server import install_service, uninstall_service
+    from .server import (
+        _systemd_active, _systemd_unit_exists, _service_path,
+        install_service, uninstall_service,
+    )
+    from .config import get_config
+    import os
 
     sub = getattr(args, "service_cmd", None)
 
+    # ── Read-only status (bare) ────────────────────────────────────────────────
+
     if sub is None:
-        print("[service] Usage:")
-        print("  llama service install    → create unit file, enable")
-        print("  llama service remove     → stop, disable, uninstall")
-        print("  llama start / stop / restart — day-to-day server management")
+        svc_path = _service_path()
+        print(f"[service] systemd unit : {svc_path}")
+        print(f"  exists              : {'yes' if os.path.exists(svc_path) else 'no'}")
+
+        if os.path.exists(svc_path):
+            with open(svc_path) as f:
+                print(f"  content             :\n{'    ' + '    '.join(f.read().splitlines())}")
+
+        try:
+            r = subprocess.run(
+                ["systemctl", "--user", "status", "llama-server.service"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0:
+                print(f"[service] status : active (running)")
+            elif r.returncode == 4:
+                print("[service] status : inactive (dead)")
+            else:
+                print(f"[service] status : {r.stdout.strip() or r.stderr.strip()}")
+        except Exception:
+            print("[service] status : could not query systemctl")
+
+        cfg = get_config()
+        print(f"[service] model           : {cfg.default_model or '(not set — run: llama config set default_model <path)'}")
+        print(f"  ctx               : {cfg.ctx}")
+        print(f"  ngl               : {cfg.ngl}")
+        print(f"  threads           : {cfg.threads}")
         return
+
+    # ── install (backward compat) ──────────────────────────────────────────────
 
     if sub == "install":
         install_service()
         return
+
+    # ── stop ───────────────────────────────────────────────────────────────────
+
+    if sub == "stop":
+        if _systemd_active():
+            subprocess.run(
+                ["systemctl", "--user", "stop", "llama-server.service"],
+                check=False,
+            )
+            print("[service] stopped")
+        else:
+            print("[service] service not running")
+        return
+
+    # ── remove (backward compat) ───────────────────────────────────────────────
 
     if sub == "remove":
         uninstall_service()
@@ -801,11 +851,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument('args', nargs=argparse.REMAINDER, help='Pass-through to llama.cpp tool')
         p.set_defaults(func=cmd_tool)
 
-   # service — install / remove only (start/stop/restart use systemctl)
-    p_svc = sub.add_parser('service', help='Install or uninstall systemd service')
+   # service — bare = read-only status, install = create unit, stop/remove = manage
+    p_svc = sub.add_parser('service', help='Manage systemd user service')
     svc_sub = p_svc.add_subparsers(dest='service_cmd', required=False)
     svc_sub.add_parser('install', help='Install service unit file').set_defaults(func=cmd_service)
-    svc_sub.add_parser('remove', help='Stop, disable, uninstall service').set_defaults(func=cmd_service)
+    svc_sub.add_parser('stop', help='Stop the service').set_defaults(func=cmd_service)
+    svc_sub.add_parser('remove', help='Uninstall service').set_defaults(func=cmd_service)
     p_svc.set_defaults(func=cmd_service)
 
     return parser
