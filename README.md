@@ -3,6 +3,7 @@
 **Ollama‑style CLI with direct `llama.cpp` performance** — no API overhead, full hardware auto‑detection, smart per‑model configuration.
 
 ## Features
+n- **Fixed restart bug**: systemd restart now works when service is stopped
 
 - **Ollama‑style CLI**: `run`, `pull`, `ls`, `rm`, `stop`
 - **All `llama-server` flags**: ctx, ngl, flash_attn, cache types, RoPE, YaRN, MoE, reasoning

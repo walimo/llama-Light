@@ -3,6 +3,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 import webbrowser
 from typing import Dict, Optional
 
@@ -53,7 +54,23 @@ def _ensure_server_or_start(args: argparse.Namespace) -> None:
     pid = _pid()
     if _is_running(pid):
         return
+
+    from .server import _systemd_unit_exists
     cfg = get_config()
+
+    if _systemd_unit_exists():
+        print("[info] server not running — starting llama-server.service")
+        subprocess.run(["systemctl", "--user", "start", "llama-server.service"])
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            if _is_healthy(cfg.host, cfg.port):
+                return
+            time.sleep(1)
+        print("[warn] server did not become healthy in time — "
+              "check: journalctl --user -u llama-server -f")
+        return
+
+    # No systemd unit installed — direct start (dev / no-systemd fallback)
     model = getattr(args, "model", None) or cfg.default_model or cfg.last_model
     if not model:
         print("[error] server not running and no --model / default_model set")
@@ -97,46 +114,57 @@ def _print_server_env(env: Dict[str, str]) -> None:
 
 # ── Command handlers ──────────────────────────────────────────────────────────
 
-def cmd_start(args):
-    from .server import _systemd_active
-    if _systemd_active():
-        print("[start] service is active — running: systemctl --user start llama-server")
-        import subprocess
-        subprocess.run(["systemctl", "--user", "start", "llama-server.service"])
-        return
+# ── Server Lifecycle ─────────────────────────────────────────────────────────
+
+def cmd_start(_args):
+    """Start llama-server via systemd (reads all settings from config.json)."""
+    from .server import _systemd_unit_exists
+    if not _systemd_unit_exists():
+        print("[error] systemd service not installed.")
+        print("  Re-run install.sh, or: llama service --install")
+        sys.exit(1)
+
+    subprocess.run(["systemctl", "--user", "start", "llama-server.service"])
 
     cfg = get_config()
-    model = getattr(args, "model", None) or cfg.default_model or cfg.last_model
+    print("[start] waiting for server", end="", flush=True)
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        if _is_healthy(cfg.host, cfg.port):
+            print(" ready ✓")
+            return
+        print(".", end="", flush=True)
+        time.sleep(1)
+    print(" timeout")
+    print("[start] check: journalctl --user -u llama-server -f")
+
+
+def cmd_run_server(args):
+    """Internal systemd launcher (llama _run). Resolves model, starts server."""
+    cfg = get_config()
+    model = cfg.default_model or cfg.last_model
     if not model:
-        print("[error] no model specified and no default_model set")
-        print("  Run: llama config set default_model <path>")
+        print("[error] no default_model set — run: llama config set default_model <path>")
         sys.exit(1)
     args.model = model
     model_path = _resolve_model_arg(args)
-    pid = start(model_path=model_path, **_resolve_server_args(args))
+    start(model_path=model_path, **_resolve_server_args(args))
     cfg.set("last_model", model_path)
 
 
 def cmd_stop(_args):
+    """Stop the running server."""
     stop()
 
 
 def cmd_kill(_args):
+    """Force-kill the server (SIGKILL)."""
     kill()
 
 
-def cmd_restart(args):
-    state = _read_state()
-    cfg   = get_config()
-    model = (getattr(args, "model", None)
-             or state.get("model_path")
-             or cfg.default_model
-             or cfg.last_model)
-    if not model:
-        print("[error] no model known — pass --model")
-        sys.exit(1)
-    args.model = model
-    restart(model_path=_resolve_model_arg(args), **_resolve_server_args(args))
+def cmd_restart(_args):
+    """Restart server and reload config.json."""
+    restart()
 
 
 def cmd_run(args):
@@ -567,7 +595,9 @@ def cmd_service(args):
 
         if os.path.exists(svc_path):
             with open(svc_path) as f:
-                print(f"  content             :\n{'    ' + '    '.join(f.read().splitlines())}")
+                content = f.read()
+            indented = "\n".join("    " + line for line in content.splitlines())
+            print(f"  content             :\n{indented}")
 
         try:
             r = subprocess.run(
@@ -742,17 +772,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest='command', required=True)
 
     # start / restart
-    for cmd, help_str, fn in [
-        ('start',   'Start llama-server daemon', cmd_start),
-        ('restart', 'Stop then start',           cmd_restart),
-    ]:
-        p = sub.add_parser(cmd, help=help_str)
-        _server_args(p)
-        p.set_defaults(func=fn)
+    sub.add_parser('start',   help='Start llama-server (systemd)').set_defaults(func=cmd_start)
+    sub.add_parser('restart', help='Restart — reloads config.json').set_defaults(func=cmd_restart)
+
+    # hidden internal launcher — invoked only by systemd's ExecStart
+    p_run = sub.add_parser('_run', help=argparse.SUPPRESS)
+    _server_args(p_run)
+    p_run.set_defaults(func=cmd_run_server)
 
     # stop / kill
-    sub.add_parser('stop', help='Stop (SIGTERM)').set_defaults(func=cmd_stop)
-    sub.add_parser('kill', help='Kill  (SIGKILL)').set_defaults(func=cmd_kill)
+    sub.add_parser('stop', help='Stop (systemd)').set_defaults(func=cmd_stop)
+    sub.add_parser('kill', help='Force-kill (systemd, SIGKILL)').set_defaults(func=cmd_kill)
 
     # setup / check
     sub.add_parser('setup', help='Download/verify llama.cpp binaries').set_defaults(func=cmd_setup)
@@ -851,7 +881,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument('args', nargs=argparse.REMAINDER, help='Pass-through to llama.cpp tool')
         p.set_defaults(func=cmd_tool)
 
-   # service — bare = read-only status, install = create unit, stop/remove = manage
+    # ── Service Management ───────────────────────────────────────────────────
+
     p_svc = sub.add_parser('service', help='Manage systemd user service')
     svc_sub = p_svc.add_subparsers(dest='service_cmd', required=False)
     svc_sub.add_parser('install', help='Install service unit file').set_defaults(func=cmd_service)

@@ -17,7 +17,7 @@ NC='\033[0m'
 LOG_FILE="/tmp/llama-light-install.log"
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║     🚀 llama-Light - One Command LLM Server (Auto CUDA)    ║${NC}"
+echo -e "${BLUE}║     🚀 llama-Light v0.2.1 - One Command LLM Server (Auto CUDA)    ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -221,19 +221,47 @@ fi
 echo -e "\n${GREEN}✅ Production Installation Matrix Complete!${NC}"
 
 # -----------------------------------------------------------------------------
-# [Service] systemd user service (optional)
+# [Service] systemd user service — written directly by install.sh
 # -----------------------------------------------------------------------------
 echo -e "\n${BLUE}[Service]${NC} Setting up systemd user service..."
 if command -v systemctl >/dev/null 2>&1 && systemctl --user --version >/dev/null 2>&1; then
-    if "$HOME/.local/bin/llama" service install; then
-        echo -e "  ${GREEN}✓${NC} llama-server.service installed and enabled"
+    SVC_DIR="$HOME/.config/systemd/user"
+    SVC_PATH="$SVC_DIR/llama-server.service"
+    mkdir -p "$SVC_DIR"
+
+    cat > "$SVC_PATH" <<EOF
+[Unit]
+Description=llama-light server daemon
+After=network.target
+
+[Service]
+Type=forking
+ExecStart=$HOME/.local/bin/llama _run
+PIDFile=$HOME/.cache/llama_light/server.pid
+KillMode=control-group
+TimeoutStartSec=300
+Restart=on-failure
+RestartSec=10
+Environment=PATH=$HOME/.local/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
+EOF
+
+    if systemctl --user daemon-reload && systemctl --user enable llama-server.service; then
+        echo -e "  ${GREEN}✓${NC} llama-server.service installed and enabled (not started)"
+        echo -e "      unit: $SVC_PATH"
     else
-        echo -e "  ${YELLOW}⚠${NC} systemd service install failed — you can retry later with:"
-        echo -e "      llama service install"
+        echo -e "  ${YELLOW}⚠${NC} systemctl daemon-reload/enable failed — unit file was written to:"
+        echo -e "      $SVC_PATH"
+        echo -e "      Retry manually: systemctl --user daemon-reload && systemctl --user enable llama-server.service"
     fi
+
+    # Allow the service to keep running after logout / terminal close
+    loginctl enable-linger "$USER" 2>/dev/null || true
 else
     echo -e "  ${YELLOW}⚠${NC} systemd --user not available — skipping service setup."
-    echo -e "      Run 'llama start' manually instead."
+    echo -e "      Run 'llama _run' manually instead."
 fi
 
 echo -e "  ${CYAN}➜${NC} You may now run: llama config set default_model <your-model.gguf>"

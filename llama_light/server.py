@@ -347,7 +347,7 @@ def start(
         f.write(str(proc.pid))
 
     print(f"[start] pid {proc.pid} — waiting for server ...", end="", flush=True)
-    deadline = time.time() + 60
+    deadline = time.time() + 180
     while time.time() < deadline:
         time.sleep(1)
         if not _is_running(proc.pid):
@@ -369,72 +369,27 @@ def start(
 
 # ── Stop / Kill / Restart ─────────────────────────────────────────────────────
 
-def _send_signal(sig: int, label: str) -> None:
-    pid = _pid()
-    if not _is_running(pid):
-        print(f"[{label}] no server running")
-        _clear_state()
-        return
-    os.kill(pid, sig)
-    print(f"[{label}] signal sent to pid {pid} ...", end="", flush=True)
-    for _ in range(10):
-        time.sleep(0.5)
-        if not _is_running(pid):
-            break
-    _clear_state()
-    print(" done")
-
 def stop() -> None:
-    if _systemd_active():
-        print("[stop] delegating to systemd (llama-server.service)")
-        subprocess.run(["systemctl", "--user", "stop", "llama-server.service"])
-        _clear_state()
-        return
-    _send_signal(signal.SIGTERM, "stop")
+    """Stop the server. Always via systemd (KillMode=control-group kills everything)."""
+    subprocess.run(["systemctl", "--user", "stop", "llama-server.service"])
+    _clear_state()
 
 
 def kill() -> None:
-    if _systemd_active():
-        print("[kill] service is systemd-managed — sending SIGKILL via systemd")
-        subprocess.run(["systemctl", "--user", "kill", "-s", "SIGKILL", "llama-server.service"])
-        _clear_state()
-        return
-    _send_signal(signal.SIGKILL, "kill")
+    """Force-kill the server via systemd (SIGKILL)."""
+    subprocess.run(["systemctl", "--user", "kill", "-s", "SIGKILL", "llama-server.service"])
+    _clear_state()
 
 
-def restart(model_path: Optional[str] = None, **kwargs) -> None:
-    if _systemd_active() or _systemd_unit_exists():
-        # Only warn if the caller passed non-default overrides
-        defaults = {"host": DEFAULT_HOST, "port": DEFAULT_PORT, "ctx": DEFAULT_CTX,
-                    "gpu_layers": DEFAULT_GPU_LAYERS, "flash_attn": True}
-        has_overrides = any(kwargs.get(k) != defaults.get(k) for k in defaults)
-        if has_overrides:
-            print("[restart] note: CLI overrides are not used for systemd-managed "
-                  "restarts. Run 'llama config set <key> <value>' first, then "
-                  "'llama restart' to apply the change.")
-        print("[restart] delegating to systemd (llama-server.service)")
-        subprocess.run(["systemctl", "--user", "restart", "llama-server.service"], check=True)
-        # Type=forking's ExecStart ('llama start') blocks on its own health
-        # check before exiting, so by the time `systemctl restart` returns the
-        # new process has already been polled for /health.
-        return
-
-    mp = model_path or _read_state().get("model_path")
-    if not mp:
-        raise RuntimeError("No model known — pass --model")
-    # Save port before stopping (state may be cleared by stop)
-    port = kwargs.get("port", _read_state().get("port", DEFAULT_PORT))
-    stop()
-    # Wait for port to free up (TCP TIME_WAIT handling)
-    state = _read_state()
-    port = kwargs.get("port", state.get("port", port))
-    deadline = time.time() + 30
-    while _detect_port_in_use(port=port):
-        if time.time() > deadline:
-            print("[restart] WARNING: port still bound after 30 s, proceeding anyway")
-            break
-        time.sleep(1)
-    start(mp, **kwargs)
+def restart(*_args, **_kwargs) -> None:
+    """Restart the server. systemd stops the old process and starts a fresh
+    one, which re-reads ~/.config/llama_light/config.json — so `llama config
+    set <key> <value>` followed by `llama restart` is how settings are applied.
+    """
+    subprocess.run(["systemctl", "--user", "stop", "llama-server.service"], check=False)
+    _clear_state()
+    time.sleep(2)
+    subprocess.run(["systemctl", "--user", "start", "llama-server.service"], check=True)
 
 
 # ── ps ────────────────────────────────────────────────────────────────────────
@@ -670,8 +625,9 @@ def _service_path() -> str:
     return os.path.expanduser("~/.config/systemd/user/llama-server.service")
 
 def install_service() -> None:
-    """Install a systemd user service that runs `llama start`.
-    All server config is read from ~/.config/llama_light/config.json at startup.
+    """Install a systemd user service that runs the server (via the internal
+    `llama _run` launcher). All server config is read from
+    ~/.config/llama_light/config.json at startup.
     To change settings: llama config set <key> <value>, then llama restart.
     """
     import shutil as _shutil
@@ -684,13 +640,14 @@ def install_service() -> None:
         "",
         "[Service]",
         "Type=forking",
-        f"ExecStart={llama_bin} start",
+        f"ExecStart={llama_bin} _run",
         f"PIDFile={PID_FILE}",
         "KillMode=control-group",
-        "TimeoutStartSec=90",
+        "TimeoutStartSec=300",
         "Restart=on-failure",
         "RestartSec=10",
-        "Environment=PATH=%h/.local/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
+        "Environment=PATH=" + os.path.expanduser("~/.local/bin")
+            + ":/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
         "",
         "[Install]",
         "WantedBy=default.target",
