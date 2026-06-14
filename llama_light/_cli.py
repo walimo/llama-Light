@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 import webbrowser
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from .server import (
     chat_messages, kill, logs, ps, restart, start, status, stop,
@@ -17,9 +17,9 @@ from .config import (
     get_config,
 )
 from .registry import find, scan_hf_cache
-from ._bincheck import check, check_with_subcmd, status as _bincheck_status, find_bin
+from ._bincheck import check, status as _bincheck_status
 from ._backup import backup, restore, list_backups
-from ._llama_downloader import ensure_binaries, check_version, upgrade
+from ._llama_downloader import ensure_binaries, check_version
 
 VERSION = "0.2.0"
 
@@ -42,7 +42,7 @@ def _resolve_model_arg(args: argparse.Namespace) -> Optional[str]:
     # walk llama_light cache
     for root, _, files in os.walk(CACHE_ROOT):
         for f in files:
-            if f == m or os.path.join(root, f).endswith(m):
+            if f == m or f.endswith(m):
                 args._model_path = os.path.join(root, f)
                 return os.path.join(root, f)
     args._model_path = m  # let server.start() give the error
@@ -60,7 +60,7 @@ def _ensure_server_or_start(args: argparse.Namespace) -> None:
         sys.exit(1)
     args.model = model
     model_path = _resolve_model_arg(args)
-    _start_pid, _t = start(model_path=model_path, **_resolve_server_args(args))
+    start(model_path=model_path, **_resolve_server_args(args))
 
 
 def _server_env() -> Dict[str, str]:
@@ -106,7 +106,7 @@ def cmd_start(args):
         sys.exit(1)
     args.model = model
     model_path = _resolve_model_arg(args)
-    pid, _thread = start(model_path=model_path, **_resolve_server_args(args))
+    pid = start(model_path=model_path, **_resolve_server_args(args))
     cfg.set("last_model", model_path)
 
 
@@ -331,7 +331,7 @@ def cmd_claude(args):
 
 def cmd_tool(args):
     """Run a llama.cpp tool via the bundled binary."""
-    from llama_light._bincheck import locate_main_bin
+    from ._bincheck import locate_main_bin
     import shlex
 
     main_bin = locate_main_bin()
@@ -409,11 +409,14 @@ def cmd_ls(_args):
 
 
 def cmd_rm(args):
+    from .registry import delete_model as reg_delete
     try:
         rm(args.model_id, getattr(args, "file", None))
     except FileNotFoundError as e:
         print(f"[rm] {e}")
         sys.exit(1)
+    # Clean up registry entry (file may have been auto-detected)
+    reg_delete(args.model_id)
 
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
@@ -530,12 +533,80 @@ def cmd_webui(args):
         print(f"       Open manually: {url}")
 
 
-def cmd_service_install(args):
-    install_service()
+def cmd_service(args):
+    """Manage the llama-server systemd service.
 
+    Usage:
+        llama service              → show unit file, systemd status, model config
+        llama service install      → create unit file, enable (backward compat)
+        llama service stop         → stop the service
+        llama service remove       → stop, disable, uninstall
+    """
+    from .server import (
+        _systemd_active, _systemd_unit_exists, _service_path,
+        install_service, uninstall_service,
+    )
+    from .config import get_config
+    import os
 
-def cmd_service_remove(_args):
-    uninstall_service()
+    sub = getattr(args, "service_cmd", None)
+
+    # ── Read-only status (bare) ────────────────────────────────────────────────
+
+    if sub is None:
+        svc_path = _service_path()
+        print(f"[service] systemd unit : {svc_path}")
+        print(f"  exists              : {'yes' if os.path.exists(svc_path) else 'no'}")
+
+        if os.path.exists(svc_path):
+            with open(svc_path) as f:
+                print(f"  content             :\n{'    ' + '    '.join(f.read().splitlines())}")
+
+        try:
+            r = subprocess.run(
+                ["systemctl", "--user", "status", "llama-server.service"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0:
+                print(f"[service] status : active (running)")
+            elif r.returncode == 4:
+                print("[service] status : inactive (dead)")
+            else:
+                print(f"[service] status : {r.stdout.strip() or r.stderr.strip()}")
+        except Exception:
+            print("[service] status : could not query systemctl")
+
+        cfg = get_config()
+        print(f"[service] model           : {cfg.default_model or '(not set — run: llama config set default_model <path)'}")
+        print(f"  ctx               : {cfg.ctx}")
+        print(f"  ngl               : {cfg.ngl}")
+        print(f"  threads           : {cfg.threads}")
+        return
+
+    # ── install (backward compat) ──────────────────────────────────────────────
+
+    if sub == "install":
+        install_service()
+        return
+
+    # ── stop ───────────────────────────────────────────────────────────────────
+
+    if sub == "stop":
+        if _systemd_active():
+            subprocess.run(
+                ["systemctl", "--user", "stop", "llama-server.service"],
+                check=False,
+            )
+            print("[service] stopped")
+        else:
+            print("[service] service not running")
+        return
+
+    # ── remove (backward compat) ───────────────────────────────────────────────
+
+    if sub == "remove":
+        uninstall_service()
+        return
 
 
 # ── Argument helpers ──────────────────────────────────────────────────────────
@@ -773,13 +844,13 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument('args', nargs=argparse.REMAINDER, help='Pass-through to llama.cpp tool')
         p.set_defaults(func=cmd_tool)
 
-    # service
+   # service — bare = read-only status, install = create unit, stop/remove = manage
     p_svc = sub.add_parser('service', help='Manage systemd user service')
-    svc_sub = p_svc.add_subparsers(dest='service_cmd', required=True)
-    p_inst = svc_sub.add_parser('install')
-    _server_args(p_inst)
-    p_inst.set_defaults(func=cmd_service_install)
-    svc_sub.add_parser('remove').set_defaults(func=cmd_service_remove)
+    svc_sub = p_svc.add_subparsers(dest='service_cmd', required=False)
+    svc_sub.add_parser('install', help='Install service unit file').set_defaults(func=cmd_service)
+    svc_sub.add_parser('stop', help='Stop the service').set_defaults(func=cmd_service)
+    svc_sub.add_parser('remove', help='Uninstall service').set_defaults(func=cmd_service)
+    p_svc.set_defaults(func=cmd_service)
 
     return parser
 

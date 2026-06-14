@@ -59,7 +59,8 @@ DEFAULT_HOST       = "127.0.0.1"
 DEFAULT_PORT       = 8080
 DEFAULT_CTX        = 200000
 DEFAULT_GPU_LAYERS = 99
-LLAMA_HOST   = os.environ.get("LLAMA_HOST",  DEFAULT_HOST)
+_LLAMA_HOST_val = os.environ.get("LLAMA_HOST")
+LLAMA_HOST   = _LLAMA_HOST_val if _LLAMA_HOST_val else DEFAULT_HOST
 _LLAMA_PORT_str = os.environ.get("LLAMA_PORT")
 LLAMA_PORT   = int(_LLAMA_PORT_str) if _LLAMA_PORT_str and _LLAMA_PORT_str.isdigit() else DEFAULT_PORT
 LLAMA_MODELS    = os.environ.get("LLAMA_MODELS", CACHE_ROOT)
@@ -251,8 +252,10 @@ class Config:
 
         # Coerce from string — only for typed keys
         if isinstance(value, str):
-            if key in _BOOL_KEYS and value.lower() in ("true", "false"):
-                value = value.lower() == "true"
+            if key in _BOOL_KEYS and value.lower() in (
+                "true", "false", "yes", "no", "1", "0", "on", "off",
+            ):
+                value = value.lower() in ("true", "yes", "1", "on")
             elif key in _INT_KEYS:
                 value = int(value)
             elif key in _FLOAT_KEYS:
@@ -277,7 +280,7 @@ class Config:
 
     # Convenience properties
     @property
-    def host(self)          -> str:           return self.get("host", DEFAULT_HOST)
+    def host(self)          -> str:           return self.get("host") or DEFAULT_HOST
     @property
     def port(self)          -> int:           return int(self.get("port", DEFAULT_PORT))
     @property
@@ -293,7 +296,7 @@ class Config:
     @property
     def parallel(self)      -> int:           return int(self.get("parallel", 1))
     @property
-    def threads(self)       -> int:           return int(self.get("threads", 0))
+    def threads(self)       -> int:           return int(self.get("threads") or 0)
     @property
     def default_model(self) -> Optional[str]: return self.get("default_model")
     @property

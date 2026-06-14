@@ -671,15 +671,10 @@ def check_version(version: str) -> str:
     if exact_path and os.path.isfile(exact_path):
         return "up_to_date"
     # Check if any version binary exists (at least one compute cap)
-    # binary_path for the version with a wildcard or common cap
-    alt_path = binary_path(version, "") if compute_cap else None
-    if not alt_path:
-        # Try without compute cap suffix
-        for cap_try in ("", "86", "89", "90", "120"):
-            p = binary_path(version, cap_try)
-            if p and os.path.isfile(p):
-                return "outdated"
-        return "missing"
+    for cap_try in ("86", "89", "90", "120"):
+        p = binary_path(version, cap_try)
+        if p and os.path.isfile(p):
+            return "outdated"
     return "missing"
 
 

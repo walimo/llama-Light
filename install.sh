@@ -219,6 +219,23 @@ if [ "$LLAMA_SETUP_EXIT" -ne 0 ]; then
 fi
 
 echo -e "\n${GREEN}✅ Production Installation Matrix Complete!${NC}"
+
+# -----------------------------------------------------------------------------
+# [Service] systemd user service (optional)
+# -----------------------------------------------------------------------------
+echo -e "\n${BLUE}[Service]${NC} Setting up systemd user service..."
+if command -v systemctl >/dev/null 2>&1 && systemctl --user --version >/dev/null 2>&1; then
+    if "$HOME/.local/bin/llama" service install; then
+        echo -e "  ${GREEN}✓${NC} llama-server.service installed and enabled"
+    else
+        echo -e "  ${YELLOW}⚠${NC} systemd service install failed — you can retry later with:"
+        echo -e "      llama service install"
+    fi
+else
+    echo -e "  ${YELLOW}⚠${NC} systemd --user not available — skipping service setup."
+    echo -e "      Run 'llama start' manually instead."
+fi
+
 echo -e "  ${CYAN}➜${NC} You may now run: llama config set default_model <your-model.gguf>"
 echo -e "  ${CYAN}➜${NC} Then:        llama start"
 echo -e "\nFull installation log saved to: $LOG_FILE"

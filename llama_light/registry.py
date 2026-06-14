@@ -109,7 +109,7 @@ def find(query: str) -> Optional[Dict]:
                         "size_gb":    round(os.path.getsize(fpath) / 1024**3, 2),
                     }
     # direct path
-    if os.path.exists(query):
+    if os.path.isfile(query):
         return {
             "name":       os.path.basename(query),
             "hf_repo":    "",

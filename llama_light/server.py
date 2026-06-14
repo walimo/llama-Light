@@ -5,11 +5,10 @@ import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, Optional
 
 from .config import (
     DEFAULT_CTX, DEFAULT_GPU_LAYERS, DEFAULT_HOST, DEFAULT_PORT,
@@ -60,6 +59,7 @@ def _base_url() -> str:
 # ── Health ────────────────────────────────────────────────────────────────────
 
 def _health(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
+    """Check single /health endpoint (2s timeout)."""
     try:
         with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=2) as r:
             return r.status == 200
@@ -68,7 +68,7 @@ def _health(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
 
 
 def _is_healthy(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
-    """Return True only if both /health and /props return successfully."""
+    """Return True only if both /health and /props return successfully (3s each)."""
     try:
         with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=3) as r:
             if r.status != 200:
@@ -94,28 +94,22 @@ def _detect_port_in_use(host: str = "0.0.0.0", port: int = DEFAULT_PORT) -> bool
             return True
 
 
-# ── Crash watcher ─────────────────────────────────────────────────────────────
+# ── systemd helper ────────────────────────────────────────────────────────────
 
-def _watch_and_restart(
-    pid: int, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT
-) -> Tuple[threading.Thread, int]:
-    """Run a daemon thread that monitors *pid* and returns the crashed PID."""
+def _systemd_active() -> bool:
+    """True if llama-server.service is currently active under systemd --user."""
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", "is-active", "--quiet", "llama-server.service"],
+            timeout=5,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
 
-    def _loop() -> int:
-        while True:
-            time.sleep(10)
-            if not _is_running(pid):
-                # Process has exited — the watcher has done its job
-                break
-            if not _is_healthy(host, port):
-                print(f"[crash] detected, server unresponsive (pid {pid})")
-                _clear_state()
-                return pid
-        return pid
 
-    t = threading.Thread(target=_loop, daemon=True, name="llama-watcher")
-    t.start()
-    return t, pid
+def _systemd_unit_exists() -> bool:
+    return os.path.exists(_service_path())
 
 
 # ── Start ─────────────────────────────────────────────────────────────────────
@@ -128,7 +122,7 @@ def start(
     gpu_layers: int = DEFAULT_GPU_LAYERS,
     flash_attn: bool = True,
     extra_args: Optional[list] = None,
-) -> Tuple[int, threading.Thread]:
+) -> int:
     ensure_dirs()
 
     bin_path = locate_main_bin()
@@ -162,14 +156,16 @@ def start(
     model_name = _model_name_from_path(model_path)
     model_cfg = get_model_config(model_name)
 
-    # Merge: global config → per-model overrides (model wins selectively)
-    m_ctx      = model_cfg.get("ctx",         ctx)
-    m_ngl      = model_cfg.get("ngl",         gpu_layers)
-    m_threads  = model_cfg.get("threads",     cfg.threads)
-    m_flash    = model_cfg.get("flash_attn",  cfg.flash_attn)
-    m_keep     = model_cfg.get("keep",        cfg.get("keep", 0))
-    m_predict  = model_cfg.get("predict",     -1)
-    m_batch    = model_cfg.get("batch_size",  cfg.batch_size)
+    # Merge: per-model config → global config → explicit params.
+    # Explicit params to start() win over per-model config, which wins over
+    # global config, which wins over hardware defaults.
+    m_ctx      = ctx if ctx != DEFAULT_CTX        else model_cfg.get("ctx",         DEFAULT_CTX)
+    m_ngl      = gpu_layers if gpu_layers != DEFAULT_GPU_LAYERS else model_cfg.get("ngl", DEFAULT_GPU_LAYERS)
+    m_threads  = model_cfg.get("threads",         cfg.threads)
+    m_flash    = model_cfg.get("flash_attn",      cfg.flash_attn)
+    m_keep     = model_cfg.get("keep",            cfg.get("keep", 0))
+    m_predict  = model_cfg.get("predict",         -1)
+    m_batch    = model_cfg.get("batch_size",      cfg.batch_size)
 
     args = [
         bin_path,
@@ -289,8 +285,11 @@ def start(
     print(f"  ngl   : {m_ngl}")
     print(f"  log   : {log_file}")
 
-    # Graceful shutdown — clean up on SIGTERM/SIGINT
+    # Graceful shutdown — clean up on SIGTERM/SIGINT while we're still
+    # polling for health.  Unregistered (SIG_DFL) once the server is up
+    # so the caller can do its own cleanup without being interrupted.
     proc_ref = [None]  # mutable container so _shutdown can access proc after Popen
+
     def _shutdown(sig, frame):
         print(f"\n[start] shutting down (signal {sig})", end="", flush=True)
         try:
@@ -300,9 +299,11 @@ def start(
         _clear_state()
         print(" done")
         raise SystemExit(0)
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
 
+    # Launch the child, install signals, then cleanup the handler on success.
+    # Installing signals *after* Popen avoids the narrow window where
+    # SIGTERM arrives before the handler is registered — the child simply
+    # terminates with its default handler (the systemd or init process reaps it).
     with open(log_file, "a") as log:
         proc = subprocess.Popen(
             args,
@@ -311,6 +312,14 @@ def start(
             start_new_session=True,
         )
         proc_ref[0] = proc
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
+
+    def _cleanup():
+        """Unregister signal handlers so start() callers can finish safely."""
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     _write_state({
         "pid":            proc.pid,
@@ -325,10 +334,9 @@ def start(
         "log":            log_file,
     })
 
-    # Start crash watcher thread
-    watcher_thread, _watcher_pid = _watch_and_restart(
-        proc.pid, host=host, port=port
-    )
+    # Plain-text PID file — used by systemd's PIDFile= directive (Type=forking)
+    with open(PID_FILE, "w") as f:
+        f.write(str(proc.pid))
 
     print(f"[start] pid {proc.pid} — waiting for server ...", end="", flush=True)
     deadline = time.time() + 60
@@ -341,12 +349,14 @@ def start(
             raise RuntimeError("process died — check the log")
         if _health(host, port):
             print(" ready ✓")
-            return proc.pid, watcher_thread
+            _cleanup()
+            return proc.pid
         print(".", end="", flush=True)
 
     print(" timeout")
     print(f"[start] did not become healthy — check {log_file}")
-    return proc.pid, watcher_thread
+    _cleanup()
+    return proc.pid
 
 
 # ── Stop / Kill / Restart ─────────────────────────────────────────────────────
@@ -366,10 +376,41 @@ def _send_signal(sig: int, label: str) -> None:
     _clear_state()
     print(" done")
 
-def stop() -> None:  _send_signal(signal.SIGTERM, "stop")
-def kill() -> None:  _send_signal(signal.SIGKILL, "kill")
+def stop() -> None:
+    if _systemd_active():
+        print("[stop] delegating to systemd (llama-server.service)")
+        subprocess.run(["systemctl", "--user", "stop", "llama-server.service"])
+        _clear_state()
+        return
+    _send_signal(signal.SIGTERM, "stop")
+
+
+def kill() -> None:
+    if _systemd_active():
+        print("[kill] service is systemd-managed — sending SIGKILL via systemd")
+        subprocess.run(["systemctl", "--user", "kill", "-s", "SIGKILL", "llama-server.service"])
+        _clear_state()
+        return
+    _send_signal(signal.SIGKILL, "kill")
+
 
 def restart(model_path: Optional[str] = None, **kwargs) -> None:
+    if _systemd_active() or _systemd_unit_exists():
+        # Only warn if the caller passed non-default overrides
+        defaults = {"host": DEFAULT_HOST, "port": DEFAULT_PORT, "ctx": DEFAULT_CTX,
+                    "gpu_layers": DEFAULT_GPU_LAYERS, "flash_attn": True}
+        has_overrides = any(kwargs.get(k) != defaults.get(k) for k in defaults)
+        if has_overrides:
+            print("[restart] note: CLI overrides are not used for systemd-managed "
+                  "restarts. Run 'llama config set <key> <value>' first, then "
+                  "'llama restart' to apply the change.")
+        print("[restart] delegating to systemd (llama-server.service)")
+        subprocess.run(["systemctl", "--user", "restart", "llama-server.service"], check=True)
+        # Type=forking's ExecStart ('llama start') blocks on its own health
+        # check before exiting, so by the time `systemctl restart` returns the
+        # new process has already been polled for /health.
+        return
+
     mp = model_path or _read_state().get("model_path")
     if not mp:
         raise RuntimeError("No model known — pass --model")
@@ -621,7 +662,7 @@ def _service_path() -> str:
     return os.path.expanduser("~/.config/systemd/user/llama-server.service")
 
 def install_service() -> None:
-    """Install a minimal systemd user service that runs `llama start`.
+    """Install a systemd user service that runs `llama start`.
     All server config is read from ~/.config/llama_light/config.json at startup.
     To change settings: llama config set <key> <value>, then llama restart.
     """
@@ -636,10 +677,12 @@ def install_service() -> None:
         "[Service]",
         "Type=forking",
         f"ExecStart={llama_bin} start",
-        "KillMode=none",
+        f"PIDFile={PID_FILE}",
+        "KillMode=control-group",
+        "TimeoutStartSec=90",
         "Restart=on-failure",
         "RestartSec=10",
-        "Environment=PATH=/home/%u/.local/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
+        "Environment=PATH=%h/.local/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
         "",
         "[Install]",
         "WantedBy=default.target",
@@ -654,12 +697,26 @@ def install_service() -> None:
     try:
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
         subprocess.run(["systemctl", "--user", "enable", "llama-server.service"], check=True)
-        subprocess.run(["systemctl", "--user", "start",  "llama-server.service"], check=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"systemctl command failed: {e}") from e
-    print(f"[service] installed and started")
+
+    # Allow the service to keep running after the user logs out / closes
+    # the terminal (otherwise systemd --user is torn down on logout).
+    try:
+        subprocess.run(
+            ["loginctl", "enable-linger", os.environ.get("USER", "")],
+            check=False, capture_output=True,
+        )
+    except Exception:
+        pass
+
+    print("[service] installed and enabled (not started)")
     print(f"  unit : {svc_path}")
-    print(f"  logs : journalctl --user -u llama-server -f")
+    from .config import get_config
+    if not get_config().default_model:
+        print("  Set a model first : llama config set default_model <path>")
+    print("  Start it          : llama start   (or: systemctl --user start llama-server)")
+    print("  Logs              : journalctl --user -u llama-server -f")
 
 def uninstall_service() -> None:
     try:
