@@ -149,8 +149,9 @@ def auto_detect_model_family(model_name: str) -> str:
     Matches substrings case-insensitively.  First match wins.
     """
     lower = model_name.lower()
+    parts = lower.replace("-", "_").split("_")
     for family in _FAMILY_NAMES:
-        if family in lower:
+        if family in parts:
             return family
     return "default"
 

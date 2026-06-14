@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import tempfile
 from typing import Dict, List, Optional
 
 from .config import HF_CACHE_DIR, REGISTRY_FILE, ensure_dirs
@@ -19,8 +20,14 @@ def _load() -> Dict:
 def _save(data: Dict) -> None:
     ensure_dirs()
     os.makedirs(os.path.dirname(REGISTRY_FILE), exist_ok=True)
-    with open(REGISTRY_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(REGISTRY_FILE))
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, REGISTRY_FILE)
+    except Exception:
+        os.unlink(tmp_path)
+        raise
 
 
 def scan_hf_cache() -> int:

@@ -257,10 +257,24 @@ class Config:
             ):
                 value = value.lower() in ("true", "yes", "1", "on")
             elif key in _INT_KEYS:
-                value = int(value)
+                try:
+                    value = int(value)
+                except ValueError:
+                    raise ValueError(f"Key '{key}' requires integer, got '{value}'")
             elif key in _FLOAT_KEYS:
-                value = float(value)
+                try:
+                    value = float(value)
+                except ValueError:
+                    raise ValueError(f"Key '{key}' requires float, got '{value}'")
             elif key not in _STRING_NONE_KEYS and value.lower() in ("null", "none"):
+                value = None
+            elif key in _STRING_NONE_KEYS and value.lower() == "none":
+                value = None
+            elif key in _BOOL_KEYS:
+                raise ValueError(
+                    f"Key '{key}' requires boolean value "
+                    f"(true/false/yes/no/1/0/on/off), got '{value}'"
+                )
                 value = None
             elif key in _STRING_NONE_KEYS and value.lower() == "none":
                 value = None

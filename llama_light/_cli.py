@@ -191,7 +191,12 @@ def cmd_chat(args):
     gen = _resolve_gen_args(args)
     print("llama chat — /clear to reset, /exit to quit")
     print("-" * 50)
+    max_turns = 100
+    turn_count = 0
     while True:
+        if turn_count >= max_turns:
+            print("[chat] conversation limit reached (100 turns) — type /exit to quit")
+            break
         try:
             user_input = input(">>> ").strip()
         except (KeyboardInterrupt, EOFError):
@@ -217,6 +222,7 @@ def cmd_chat(args):
             break
         print()
         messages.append({"role": "assistant", "content": "".join(resp)})
+        turn_count += 1
 
 
 # ── Hermes / Claude persona helpers ──────────────────────────────────────────
@@ -558,7 +564,7 @@ def cmd_webui(args):
     port = state.get("port", 8080)
     host = state.get("host", "127.0.0.1")
     url = f"http://{host}:{port}"
-    sys_param = _WEBUI_SYSTEM.replace(" ", "+")
+    sys_param = _WEBUI_SYSTEM.replace(" ", "%20")
     url += "?system=" + sys_param
     print(f"[webui] opening {url}")
     try:

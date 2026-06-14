@@ -371,13 +371,28 @@ def start(
 
 def stop() -> None:
     """Stop the server. Always via systemd (KillMode=control-group kills everything)."""
-    subprocess.run(["systemctl", "--user", "stop", "llama-server.service"])
+    if not _systemd_unit_exists():
+        print("[stop] systemd service not installed — server may still be running")
+        return
+    result = subprocess.run(
+        ["systemctl", "--user", "stop", "llama-server.service"], capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f"[stop] systemctl failed: {result.stderr.strip()}")
     _clear_state()
 
 
 def kill() -> None:
     """Force-kill the server via systemd (SIGKILL)."""
-    subprocess.run(["systemctl", "--user", "kill", "-s", "SIGKILL", "llama-server.service"])
+    if not _systemd_unit_exists():
+        print("[kill] systemd service not installed — server may still be running")
+        return
+    result = subprocess.run(
+        ["systemctl", "--user", "kill", "-s", "SIGKILL", "llama-server.service"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"[kill] systemctl failed: {result.stderr.strip()}")
     _clear_state()
 
 
@@ -386,10 +401,22 @@ def restart(*_args, **_kwargs) -> None:
     one, which re-reads ~/.config/llama_light/config.json — so `llama config
     set <key> <value>` followed by `llama restart` is how settings are applied.
     """
+    if not _systemd_unit_exists():
+        print("[restart] systemd service not installed — cannot restart")
+        return
     subprocess.run(["systemctl", "--user", "stop", "llama-server.service"], check=False)
     _clear_state()
     time.sleep(2)
-    subprocess.run(["systemctl", "--user", "start", "llama-server.service"], check=True)
+    result = subprocess.run(
+        ["systemctl", "--user", "start", "llama-server.service"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "systemctl start failed after restart.\n"
+            f"stderr: {result.stderr.strip()}\n"
+            "Check: journalctl --user -u llama-server -f"
+        )
 
 
 # ── ps ────────────────────────────────────────────────────────────────────────
@@ -541,8 +568,8 @@ def logs(n: int = 40) -> None:
         print(f"[logs] not found: {log}")
         return
     with open(log) as f:
-        lines = f.readlines()
-    for line in lines[-n:]:
+        lines = f.readlines()[-n:]
+    for line in lines:
         print(line, end="")
 
 

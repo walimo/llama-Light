@@ -332,7 +332,7 @@ def build_from_source(version: str, cache_dir: str, compute_cap: str) -> bool:
             clone_error = str(e)
         
         # Fallback to latest main branch
-        if not clone_success and not clone_error:
+        if not clone_success:
             try:
                 subprocess.run(
                     ["git", "clone", "--depth", "1",
@@ -344,17 +344,14 @@ def build_from_source(version: str, cache_dir: str, compute_cap: str) -> bool:
                 print_ok("Repository cloned (latest main)")
                 clone_success = True
             except subprocess.CalledProcessError:
-                print_error("Clone failed (no network or git issue)")
+                print_error(f"Clone failed (no network or git issue): {clone_error}")
                 return False
             except subprocess.TimeoutExpired:
-                print_error("Clone timed out (timeout=300s)")
+                print_error(f"Clone timed out (timeout=300s): {clone_error}")
                 return False
             except Exception as e:
-                print_error(f"Clone failed: {e}")
+                print_error(f"Clone failed: {e}: {clone_error}")
                 return False
-        elif not clone_success:
-            print_error(f"Clone failed: {clone_error}")
-            return False
         
         # ── Prepare build directory ───────────────────────────────────────
         os.makedirs(build_dir, exist_ok=True)
@@ -515,6 +512,19 @@ def download_prebuilt_binary(version: str, compute_cap: str, cache_dir: str) -> 
 
             extract_dir = os.path.join(tmpdir, "extracted")
             os.makedirs(extract_dir, exist_ok=True)
+            # Validate archive entries to prevent path traversal
+            r = subprocess.run(
+                ["unzip", "-Z", "-1", zip_path],
+                capture_output=True, text=True, timeout=60
+            )
+            if r.returncode != 0:
+                print_error("Failed to list archive contents")
+                return None
+            for entry in r.stdout.strip().splitlines():
+                if entry.startswith("/") or ".." in entry:
+                    print_error(f"Unsafe path in archive: {entry}")
+                    return None
+
             r = subprocess.run(
                 ["unzip", "-o", "-q", zip_path, "-d", extract_dir],
                 capture_output=True, text=True, timeout=60
