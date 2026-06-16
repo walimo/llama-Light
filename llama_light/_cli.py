@@ -645,6 +645,28 @@ def cmd_info(_args):
                 print(f"  {k:<25} {v}")
 
 
+def cmd_config(_args):
+    """Bare `llama config` / `llama config -h` — print all global config keys with types & defaults."""
+    from .config import _INT_KEYS, _FLOAT_KEYS, _BOOL_KEYS, _STRING_NONE_KEYS, _VALID_KEYS
+    cfg = get_config()
+    defaults = cfg.all()
+    print(f"{'KEY':<25} TYPE{' ' * 8} DEFAULT")
+    print(f"{'-' * 25}  {'-' * 10}  {'-' * 20}")
+    for k in sorted(_VALID_KEYS):
+        def_val = defaults.get(k, "—")
+        if k in _INT_KEYS:
+            typ = "int"
+        elif k in _FLOAT_KEYS:
+            typ = "float"
+        elif k in _BOOL_KEYS:
+            typ = "bool"
+        elif k in _STRING_NONE_KEYS:
+            typ = "string"
+        else:
+            typ = "any"
+        print(f"  {k:<25} {typ:<10} {def_val}")
+
+
 def cmd_config_show(_args):
     cfg = get_config()
     print(f"{'KEY':<25} VALUE")
@@ -655,6 +677,28 @@ def cmd_config_show(_args):
 
 def cmd_config_set(args):
     cfg = get_config()
+
+    # `--keys` — list every known config key with type & default value
+    if getattr(args, "keys", False):
+        from .config import _INT_KEYS, _FLOAT_KEYS, _BOOL_KEYS, _STRING_NONE_KEYS, _VALID_KEYS
+        defaults = cfg.all()
+        print(f"{'KEY':<25} TYPE{' ' * 8} DEFAULT")
+        print(f"{'-' * 25}  {'-' * 10}  {'-' * 20}")
+        for k in sorted(_VALID_KEYS):
+            def_val = defaults.get(k, "—")
+            if k in _INT_KEYS:
+                typ = "int"
+            elif k in _FLOAT_KEYS:
+                typ = "float"
+            elif k in _BOOL_KEYS:
+                typ = "bool"
+            elif k in _STRING_NONE_KEYS:
+                typ = "string"
+            else:
+                typ = "any"
+            print(f"  {k:<25} {typ:<10} {def_val}")
+        return
+
     model = getattr(args, "model", None)
     if model:
         from .per_model import update_model_config, _model_name_from_path
@@ -1049,7 +1093,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── Configuration ──
     p_cfg = sub.add_parser('config', help='Get/set configuration')
-    cfg_sub = p_cfg.add_subparsers(dest='config_cmd', required=True)
+    cfg_sub = p_cfg.add_subparsers(dest='config_cmd', required=False)
     cfg_sub.add_parser('show').set_defaults(func=cmd_config_show)
     cfg_sub.add_parser('backup').set_defaults(func=cmd_config_backup)
     p_restore = cfg_sub.add_parser('restore')
@@ -1058,10 +1102,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_restore.set_defaults(func=cmd_config_restore)
     cfg_sub.add_parser('list-backups').set_defaults(func=cmd_config_list_backups)
     p_set = cfg_sub.add_parser('set')
-    p_set.add_argument('key')
-    p_set.add_argument('value')
-    p_set.add_argument('--model', default=None)
+    p_set.add_argument('key', nargs='?', help='Config key (run: llama config set --keys)')
+    p_set.add_argument('value', nargs='?', help='Config value (int / float / bool / string)')
+    p_set.add_argument('--model', default=None,
+                       help='Per-model override (e.g. --model Opus4.8)')
+    p_set.add_argument('--keys', action='store_true',
+                       help='List all known keys with types & defaults')
     p_set.set_defaults(func=cmd_config_set)
+    # Default handler for bare "llama config" → print all global config keys
+    p_cfg.set_defaults(func=cmd_config)
 
     # ── Tools ──
     for cmd, desc_tool in [
@@ -1106,6 +1155,14 @@ def main():
     if len(sys.argv) == 2 and sys.argv[1] in ('-h', '--help'):
         _banner()
         return
+    # Special case: `llama config` or `llama config -h` → show all global keys
+    if len(sys.argv) == 2 and sys.argv[1] == 'config':
+        cmd_config(type('Args', (), {})())
+        return
+    if len(sys.argv) == 3 and sys.argv[1] == 'config' and sys.argv[2] in ('-h', '--help'):
+        cmd_config(type('Args', (), {})())
+        return
+
     parser = build_parser()
     args = parser.parse_args()
     if args.command is None:
