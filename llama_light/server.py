@@ -185,6 +185,13 @@ def start(
     m_keep     = model_cfg.get("keep",            cfg.get("keep", 0))
     m_predict  = model_cfg.get("predict",         -1)
     m_batch    = model_cfg.get("batch_size",      cfg.batch_size)
+    m_temp     = model_cfg.get("temperature",     cfg.get("temperature"))
+    m_top_p    = model_cfg.get("top_p",           cfg.get("top_p"))
+    m_min_p    = model_cfg.get("min_p",           cfg.get("min_p"))
+    m_repeat_p = model_cfg.get("repeat_penalty",  cfg.get("repeat_penalty"))
+    m_repeat_n = model_cfg.get("repeat_last_n",   cfg.get("repeat_last_n"))
+    m_pres_p   = model_cfg.get("presence_penalty",cfg.get("presence_penalty"))
+    m_freq_p   = model_cfg.get("frequency_penalty",cfg.get("frequency_penalty"))
 
     args = [
         bin_path,
@@ -255,7 +262,9 @@ def start(
     if cfg.get("n_cpu_moe"):
         args += ["--n-cpu-moe", str(cfg.get("n_cpu_moe"))]
 
-    # reasoning — model-level setting overrides global
+    # reasoning — controlled by config only:
+    #   config.json reasoning: true  → --reasoning on  + --reasoning-format + --reasoning-budget
+    #   config.json reasoning: false → --reasoning off + --chat-template-kwargs
     m_reasoning    = model_cfg.get("reasoning",  cfg.get("reasoning",  False))
     reasoning_on   = str(m_reasoning).lower() not in ("false", "off", "0") and m_reasoning is not False
     m_reason_budget = model_cfg.get("reasoning_budget", cfg.get("reasoning_budget", 0))
@@ -293,6 +302,23 @@ def start(
         args += ["-n", str(m_predict)]
     if m_keep != 0:
         args += ["--keep", str(m_keep)]
+
+    # sampling parameters — wired from config to llama-server
+    # (merged: per-model override > global config > None)
+    if m_temp is not None:
+        args += ["--temp", str(m_temp)]
+    if m_top_p is not None:
+        args += ["--top-p", str(m_top_p)]
+    if m_min_p is not None:
+        args += ["--min-p", str(m_min_p)]
+    if m_repeat_p is not None:
+        args += ["--repeat-penalty", str(m_repeat_p)]
+    if m_repeat_n is not None:
+        args += ["--repeat-last-n", str(m_repeat_n)]
+    if m_pres_p is not None:
+        args += ["--presence-penalty", str(m_pres_p)]
+    if m_freq_p is not None:
+        args += ["--frequency-penalty", str(m_freq_p)]
 
     if extra_args:
         args += extra_args
