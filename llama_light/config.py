@@ -197,7 +197,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         # Reasoning
         "reasoning":        True,
         "reasoning_format": "deepseek",
-        "reasoning_budget": 10000,
+        "reasoning_budget": 256,
         # Profile
         "active_profile":   "default",
         # Tool calling

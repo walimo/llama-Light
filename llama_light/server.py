@@ -208,8 +208,8 @@ def start(
         "--ubatch-size", str(cfg.ubatch_size),
         "--threads",     str(m_threads),
         "--threads-batch", str(cfg.get("threads_batch", m_threads)),
-        "--cache-type-k", str(cfg.get("cache_type_k", "f16")),
-        "--cache-type-v", str(cfg.get("cache_type_v", "f16")),
+        "--cache-type-k", str(cfg.get("cache_type_k", "q4_0")),
+        "--cache-type-v", str(cfg.get("cache_type_v", "q4_0")),
     ]
 
     # KV offload — default on; flag only needed to disable
@@ -272,11 +272,14 @@ def start(
     if not reasoning_on:
         args += ["--reasoning", "off"]
         args += ["--chat-template-kwargs", '{"thinking":false}']
-    elif m_reason_budget:
-        rf = cfg.get("reasoning_format", "none")
+    elif reasoning_on:
+        rf = model_cfg.get("reasoning_format", cfg.get("reasoning_format", "none"))
         if rf and str(rf).lower() not in ("none", "null", ""):
             args += ["--reasoning-format", str(rf)]
-        args += ["--reasoning-budget", str(m_reason_budget)]
+        if m_reason_budget:
+            args += ["--reasoning-budget", str(m_reason_budget)]
+        else:
+            args += ["--reasoning-budget", "0"]
 
     # misc flags
     if cfg.get("swa_full", False):
@@ -293,7 +296,9 @@ def start(
         args.append("--no-host")
     if not cfg.get("repack", True):
         args.append("--no-repack")
-    if cfg.get("ui_mcp_proxy", "on") != "on":
+    if cfg.get("ui_mcp_proxy", "on") == "on":
+        args.append("--ui-mcp-proxy")
+    elif cfg.get("ui_mcp_proxy"):
         args += ["--ui-mcp-proxy", str(cfg.get("ui_mcp_proxy"))]
     if cfg.get("tools", "all") != "all":
         args += ["--tools", str(cfg.get("tools"))]
