@@ -303,19 +303,19 @@ class Config:
     @property
     def host(self)          -> str:           return self.get("host") or DEFAULT_HOST
     @property
-    def port(self)          -> int:           return int(self.get("port", DEFAULT_PORT))
+    def port(self)          -> int:           return int(self.get("port") or DEFAULT_PORT)
     @property
-    def ctx(self)           -> int:           return int(self.get("ctx", DEFAULT_CTX))
+    def ctx(self)           -> int:           return int(self.get("ctx") or DEFAULT_CTX)
     @property
-    def ngl(self)           -> int:           return int(self.get("ngl", DEFAULT_GPU_LAYERS))
+    def ngl(self)           -> int:           return int(self.get("ngl") or DEFAULT_GPU_LAYERS)
     @property
-    def flash_attn(self)    -> str:           return str(self.get("flash_attn", "auto"))
+    def flash_attn(self)    -> str:           return str(self.get("flash_attn") or "on")
     @property
-    def batch_size(self)    -> int:           return int(self.get("batch_size", 2048))
+    def batch_size(self)    -> int:           return int(self.get("batch_size") or 512)
     @property
-    def ubatch_size(self)   -> int:           return int(self.get("ubatch_size", 512))
+    def ubatch_size(self)   -> int:           return int(self.get("ubatch_size") or 512)
     @property
-    def parallel(self)      -> int:           return int(self.get("parallel", 1))
+    def parallel(self)      -> int:           return int(self.get("parallel") or 1)
     @property
     def threads(self)       -> int:           return int(self.get("threads") or 0)
     @property

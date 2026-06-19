@@ -993,8 +993,6 @@ def _resolve_server_args(args) -> dict:
     return {
         "host":       args.host  if args.host is not None else cfg.host,
         "port":       args.port  if args.port is not None else cfg.port,
-        "ctx":        args.ctx   if args.ctx  is not None else cfg.ctx,
-        "gpu_layers": args.ngl   if args.ngl  is not None else cfg.ngl,
         # CLI --no-flash-attn overrides config; otherwise use config value
         "flash_attn": False if getattr(args, "no_flash_attn", False) else cfg_flash,
     }
@@ -1012,9 +1010,8 @@ def _gen_args(p: argparse.ArgumentParser) -> None:
 
 
 def _resolve_gen_args(args) -> dict:
-    """Merge CLI gen args with per-model config; CLI > model > global > defaults."""
+    """Merge CLI gen args with per-model config; CLI > model > global (config.py)."""
     from .per_model import get_model_config, _model_name_from_path
-    from .config import get_config
 
     cfg = get_config()
     # Get per-model settings (auto-detected + user-saved)
@@ -1025,22 +1022,22 @@ def _resolve_gen_args(args) -> dict:
     else:
         model_cfg = {}
 
-    def _resolve(key, cli_val, model_default, global_default):
-        """Priority: CLI > model config > global config."""
+    def _resolve(key, cli_val):
+        """Priority: CLI > model config > global config (config.py)."""
         if cli_val is not None:
             return cli_val
         if key in model_cfg:
             return model_cfg[key]
-        return cfg.get(key, global_default)
+        return cfg.get(key)
 
     return {
-        "temperature":         _resolve("temperature", args.temperature, model_cfg.get("temperature"), 0.6),
-        "top_k":               _resolve("top_k", args.top_k, model_cfg.get("top_k"), 20),
-        "max_tokens":          _resolve("max_tokens", args.max_tokens, model_cfg.get("max_tokens"), 4096),
-        "top_p":               _resolve("top_p", args.top_p, model_cfg.get("top_p"), 0.95),
-        "min_p":               _resolve("min_p", args.min_p, model_cfg.get("min_p"), 0.05),
-        "frequency_penalty":   _resolve("frequency_penalty", args.frequency_penalty, model_cfg.get("frequency_penalty"), 0.0),
-        "presence_penalty":    _resolve("presence_penalty", args.presence_penalty, model_cfg.get("presence_penalty"), 0.0),
+        "temperature":         _resolve("temperature", args.temperature),
+        "top_k":               _resolve("top_k", args.top_k),
+        "max_tokens":          _resolve("max_tokens", args.max_tokens),
+        "top_p":               _resolve("top_p", args.top_p),
+        "min_p":               _resolve("min_p", args.min_p),
+        "frequency_penalty":   _resolve("frequency_penalty", args.frequency_penalty),
+        "presence_penalty":    _resolve("presence_penalty", args.presence_penalty),
     }
 
 

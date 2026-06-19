@@ -126,13 +126,23 @@ def _systemd_unit_exists() -> bool:
 
 def start(
     model_path: str,
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    ctx: int = DEFAULT_CTX,
-    gpu_layers: int = DEFAULT_GPU_LAYERS,
-    flash_attn: bool = True,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    flash_attn: Optional[bool] = None,
     extra_args: Optional[list] = None,
 ) -> int:
+    """Launch llama-server, reading defaults from config.json.
+
+    All parameters default to None so callers can omit them and have the
+    function read from config.json (which itself falls back to hardware
+    detection in config.py get_defaults()).  _resolve_server_args in _cli.py
+    always passes explicit values, so the None-branch is only for direct
+    API use.
+
+    Server-side tuning (ctx, ngl, threads, etc.) is always read from the
+    config chain (per-model > global config > config.py defaults), not
+    from function parameters — keep the function signature lean.
+    """
     ensure_dirs()
 
     bin_path = locate_main_bin()
@@ -145,6 +155,16 @@ def start(
         )
     if not os.path.exists(model_path):
         raise RuntimeError(f"Model not found: {model_path}")
+
+    # Resolve to config values when the caller passes None (direct API use).
+    # When the CLI calls this, _resolve_server_args already supplies explicit
+    # values, so these branches are only taken for programmatic callers.
+    from .config import get_config
+    cfg = get_config()
+    host = host if host is not None else cfg.host
+    port = port if port is not None else cfg.port
+    if flash_attn is None:
+        flash_attn = str(cfg.flash_attn).lower() not in ("off", "false", "0")
 
     pid = _pid()
     if _is_running(pid):
@@ -166,33 +186,28 @@ def start(
 
     log_file = os.path.join(LOG_DIR, "server.log")
 
-    # pull full config so all keys are wired through
-    from .config import get_config
-    cfg = get_config()
-
     # per-model settings — auto-detected + user-saved overrides
     from .per_model import get_model_config, _model_name_from_path
     model_name = _model_name_from_path(model_path)
     model_cfg = get_model_config(model_name)
 
-    # Merge: per-model config → global config → explicit params.
-    # Explicit params to start() win over per-model config, which wins over
-    # global config, which wins over hardware defaults.
-    m_ctx      = ctx if ctx != DEFAULT_CTX        else model_cfg.get("ctx",         DEFAULT_CTX)
-    m_ngl      = gpu_layers if gpu_layers != DEFAULT_GPU_LAYERS else model_cfg.get("ngl", DEFAULT_GPU_LAYERS)
-    m_threads  = model_cfg.get("threads",         cfg.threads)
-    m_flash    = model_cfg.get("flash_attn",      cfg.flash_attn)
-    m_keep     = model_cfg.get("keep",            cfg.get("keep", 0))
-    m_predict  = model_cfg.get("predict",         -1)
-    m_batch    = model_cfg.get("batch_size",      cfg.batch_size)
-    m_temp     = model_cfg.get("temperature",     cfg.get("temperature"))
-    m_top_p    = model_cfg.get("top_p",           cfg.get("top_p"))
-    m_min_p    = model_cfg.get("min_p",           cfg.get("min_p"))
-    m_repeat_p = model_cfg.get("repeat_penalty",  cfg.get("repeat_penalty"))
-    m_repeat_n = model_cfg.get("repeat_last_n",   cfg.get("repeat_last_n"))
-    m_pres_p   = model_cfg.get("presence_penalty",cfg.get("presence_penalty"))
-    m_freq_p   = model_cfg.get("frequency_penalty",cfg.get("frequency_penalty"))
-    m_top_k    = model_cfg.get("top_k",           cfg.get("top_k"))
+    # Merge: per-model config > global config (config.json > config.py defaults).
+    # The cfg object reads config.json first, then falls back to config.py defaults.
+    m_ctx      = model_cfg.get("ctx",    cfg.get("ctx"))
+    m_ngl      = model_cfg.get("ngl",    cfg.get("ngl"))
+    m_threads  = model_cfg.get("threads", cfg.get("threads"))
+    m_flash    = model_cfg.get("flash_attn", cfg.flash_attn)
+    m_keep     = model_cfg.get("keep",     cfg.get("keep"))
+    m_predict  = model_cfg.get("predict",  cfg.get("predict"))
+    m_batch    = model_cfg.get("batch_size", cfg.batch_size)
+    m_temp     = model_cfg.get("temperature", cfg.get("temperature"))
+    m_top_p    = model_cfg.get("top_p", cfg.get("top_p"))
+    m_min_p    = model_cfg.get("min_p", cfg.get("min_p"))
+    m_repeat_p = model_cfg.get("repeat_penalty", cfg.get("repeat_penalty"))
+    m_repeat_n = model_cfg.get("repeat_last_n", cfg.get("repeat_last_n"))
+    m_pres_p   = model_cfg.get("presence_penalty", cfg.get("presence_penalty"))
+    m_freq_p   = model_cfg.get("frequency_penalty", cfg.get("frequency_penalty"))
+    m_top_k    = model_cfg.get("top_k", cfg.get("top_k"))
 
     args = [
         bin_path,
@@ -203,23 +218,23 @@ def start(
         "-ngl",          str(m_ngl),
         "--parallel",    str(cfg.parallel),
         "--flash-attn",  "on" if str(m_flash).lower() not in ("off", "false", "0") else "off",
-        "--tools",       "all",
+        "--tools",       str(cfg.get("tools", "all")),
         "-b",            str(m_batch),
         "--ubatch-size", str(cfg.ubatch_size),
         "--threads",     str(m_threads),
-        "--threads-batch", str(cfg.get("threads_batch", m_threads)),
-        "--cache-type-k", str(cfg.get("cache_type_k", "q4_0")),
-        "--cache-type-v", str(cfg.get("cache_type_v", "q4_0")),
+        "--threads-batch", str(cfg.get("threads_batch")),
+        "--cache-type-k", str(cfg.get("cache_type_k")),
+        "--cache-type-v", str(cfg.get("cache_type_v")),
     ]
 
     # KV offload — default on; flag only needed to disable
-    if not cfg.get("kv_offload", True):
+    if not cfg.get("kv_offload"):
         args.append("--no-kv-offload")
 
     # mmap / mlock
-    if not cfg.get("mmap", True):
+    if not cfg.get("mmap"):
         args.append("--no-mmap")
-    if cfg.get("mlock", False):
+    if cfg.get("mlock"):
         args.append("--mlock")
 
     # split mode
@@ -266,14 +281,15 @@ def start(
     # reasoning — controlled by config only:
     #   config.json reasoning: true  → --reasoning on  + --reasoning-format + --reasoning-budget
     #   config.json reasoning: false → --reasoning off + --chat-template-kwargs
-    m_reasoning    = model_cfg.get("reasoning",  cfg.get("reasoning",  False))
-    reasoning_on   = str(m_reasoning).lower() not in ("false", "off", "0") and m_reasoning is not False
-    m_reason_budget = model_cfg.get("reasoning_budget", cfg.get("reasoning_budget", 0))
+    # Priority: per-model > config.json > config.py defaults (via cfg._data pre-seed).
+    m_reasoning    = model_cfg.get("reasoning", cfg.get("reasoning"))
+    reasoning_on   = m_reasoning is not False and str(m_reasoning).lower() not in ("false", "off", "0")
+    m_reason_budget = model_cfg.get("reasoning_budget", cfg.get("reasoning_budget"))
     if not reasoning_on:
         args += ["--reasoning", "off"]
         args += ["--chat-template-kwargs", '{"thinking":false}']
     elif reasoning_on:
-        rf = model_cfg.get("reasoning_format", cfg.get("reasoning_format", "none"))
+        rf = model_cfg.get("reasoning_format", cfg.get("reasoning_format"))
         if rf and str(rf).lower() not in ("none", "null", ""):
             args += ["--reasoning-format", str(rf)]
         if m_reason_budget:
@@ -282,26 +298,24 @@ def start(
             args += ["--reasoning-budget", "0"]
 
     # misc flags
-    if cfg.get("swa_full", False):
+    if cfg.get("swa_full"):
         args.append("--swa-full")
-    if cfg.get("perf", False):
+    if cfg.get("perf"):
         args.append("--perf")
-    if not cfg.get("escape", True):
+    if not cfg.get("escape"):
         args.append("--no-escape")
     if cfg.get("override_tensor"):
         args += ["--override-tensor", str(cfg.get("override_tensor"))]
-    if cfg.get("direct_io", False):
+    if cfg.get("direct_io"):
         args.append("--direct-io")
-    if cfg.get("no_host", False):
+    if cfg.get("no_host"):
         args.append("--no-host")
-    if not cfg.get("repack", True):
+    if not cfg.get("repack"):
         args.append("--no-repack")
-    if cfg.get("ui_mcp_proxy", "on") == "on":
+    if cfg.get("ui_mcp_proxy") == "on":
         args.append("--ui-mcp-proxy")
     elif cfg.get("ui_mcp_proxy"):
         args += ["--ui-mcp-proxy", str(cfg.get("ui_mcp_proxy"))]
-    if cfg.get("tools", "all") != "all":
-        args += ["--tools", str(cfg.get("tools"))]
 
     # generation defaults wired as server-side caps (use model values when set)
     if m_predict != -1:
@@ -643,24 +657,30 @@ def logs(n: int = 40) -> None:
 
 # ── chat_messages (OpenAI-compatible, disables thinking via message format) ───
 
+# Sentinel for "not provided — fall back to config.json".
+_CHAT_NOT_SET = object()
+
+
 def chat_messages(
     messages: list,
-    temperature: float = 0.7,
-    top_k: int = 40,
-    max_tokens: int = 2048,
+    temperature: float = _CHAT_NOT_SET,
+    top_k: int = _CHAT_NOT_SET,
+    max_tokens: int = _CHAT_NOT_SET,
     stream: bool = True,
     # Token-efficient params — pass through to llama-server
-    top_p: float = 0.95,
-    min_p: float = 0.05,
-    frequency_penalty: float = 0.0,
-    presence_penalty: float = 0.0,
+    top_p: float = _CHAT_NOT_SET,
+    min_p: float = _CHAT_NOT_SET,
+    frequency_penalty: float = _CHAT_NOT_SET,
+    presence_penalty: float = _CHAT_NOT_SET,
 ) -> "Iterator[str]":
     """
     POST /v1/chat/completions with a proper messages array.
 
-    Token-efficient defaults (low temp, tight top-p, penalties) reduce
-    wasted tokens on repetition and verbosity, keeping costs down.
+    When a parameter is not provided, defaults are read from config.json
+    (falling back to config.py get_defaults()) so the generation params
+    stay in a single source of truth.
     """
+    from .config import get_config
     state = _read_state()
     pid   = state.get("pid")
     if not _is_running(pid):
@@ -668,6 +688,25 @@ def chat_messages(
 
     host = state.get("host", LLAMA_HOST)
     port = state.get("port", LLAMA_PORT)
+
+    # Resolve params: explicit arg > config.json > config.py defaults.
+    # _CHAT_NOT_SET means the caller did not provide the arg, so we read
+    # from the canonical config source.
+    cfg = get_config()
+    if temperature is _CHAT_NOT_SET:
+        temperature = cfg.get("temperature", 0.7)
+    if top_k is _CHAT_NOT_SET:
+        top_k = cfg.get("top_k", 20)
+    if max_tokens is _CHAT_NOT_SET:
+        max_tokens = cfg.get("max_tokens", 4096)
+    if top_p is _CHAT_NOT_SET:
+        top_p = cfg.get("top_p", 0.95)
+    if min_p is _CHAT_NOT_SET:
+        min_p = cfg.get("min_p", 0.05)
+    if frequency_penalty is _CHAT_NOT_SET:
+        frequency_penalty = cfg.get("frequency_penalty", 0.0)
+    if presence_penalty is _CHAT_NOT_SET:
+        presence_penalty = cfg.get("presence_penalty", 0.0)
 
     payload = json.dumps({
         "messages":            messages,
