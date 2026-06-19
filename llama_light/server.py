@@ -192,6 +192,7 @@ def start(
     m_repeat_n = model_cfg.get("repeat_last_n",   cfg.get("repeat_last_n"))
     m_pres_p   = model_cfg.get("presence_penalty",cfg.get("presence_penalty"))
     m_freq_p   = model_cfg.get("frequency_penalty",cfg.get("frequency_penalty"))
+    m_top_k    = model_cfg.get("top_k",           cfg.get("top_k"))
 
     args = [
         bin_path,
@@ -319,6 +320,8 @@ def start(
         args += ["--presence-penalty", str(m_pres_p)]
     if m_freq_p is not None:
         args += ["--frequency-penalty", str(m_freq_p)]
+    if m_top_k is not None:
+        args += ["--top-k", str(m_top_k)]
 
     if extra_args:
         args += extra_args
