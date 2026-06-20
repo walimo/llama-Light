@@ -20,6 +20,20 @@
 
 ## Installation
 
+### One-liner install
+
+**Linux**
+```bash
+curl -fsSL https://raw.githubusercontent.com/walimo/llama-Light/main/install.sh | bash
+```
+
+**Windows**
+```powershell
+iwr -useb https://raw.githubusercontent.com/walimo/llama-Light/main/install.ps1 | iex
+```
+
+### Source install
+
 ```bash
 pip install llama-light  # latest from PyPI
 # or: pip install .  # from source directory
