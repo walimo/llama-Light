@@ -4,6 +4,7 @@
 
 ## Features
 
+- **Cross-platform**: Linux (systemd service) + Windows (prebuilt binaries, Windows service)
 - **Zero‑overhead server**: Spawns `llama-server` directly — no Go daemon, no API middleware, no translation layer.
 - **All `llama-server` flags**: ctx, ngl, flash_attn, cache types, RoPE, YaRN, MoE, reasoning, reasoning_format, reasoning_budget
 - **Hardware auto‑detection**: GPU, CPU → `cache_type`, `ngl`, `threads`, `flash_attn`
@@ -25,6 +26,33 @@ pip install llama-light  # latest from PyPI
 ```
 
 Prerequisite: NVIDIA driver with `nvidia-smi` available. The installer auto-detects CUDA version and GPU architecture.
+
+### Windows
+
+```powershell
+# Run from an elevated PowerShell (right-click → Run as Administrator)
+cd C:\path\to\llama-Light
+.\install.ps1
+```
+
+The Windows installer (`install.ps1`):
+- Detects NVIDIA GPU via `nvidia-smi` and downloads prebuilt CUDA binary from llama.cpp GitHub releases
+- Falls back to CPU-only binary if no NVIDIA GPU is present
+- Downloads CUDA runtime library (`cudart`) automatically
+- Creates a Python virtual environment and installs `llama-light`
+- Registers a Windows Service (`llama-light`) via `sc.exe`
+- No CMake, no Visual Studio, no source build required
+
+Post-install (non-elevated PowerShell):
+```powershell
+llama config set default_model C:\models\Opus4.8.gguf
+llama start
+
+# Or manage via Windows Service:
+Start-Service llama-light
+Stop-Service llama-light
+Get-Service llama-light
+```
 
 ## Quick Start
 
