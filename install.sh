@@ -267,4 +267,110 @@ fi
 
 echo -e "  ${CYAN}➜${NC} You may now run: llama config set default_model <your-model.gguf>"
 echo -e "  ${CYAN}➜${NC} Then:        llama start"
-echo -e "\nFull installation log saved to: $LOG_FILE"
+
+# -----------------------------------------------------------------------------
+# [8/7] Ultimate MCP Server Integration
+# -----------------------------------------------------------------------------
+echo -e "\\n${BLUE}[8/7]${NC} Setting up Ultimate MCP Server..."
+
+MCP_DIR="$HOME/.cache/llama-light/ultimate-mcp"
+MCP_SOURCE="$PWD/llama_light/ultimate_mcp_server.py"
+MCP_DEST="$MCP_DIR/server.py"
+
+if [ -d "$MCP_DIR" ]; then
+    rm -rf "$MCP_DIR"
+fi
+mkdir -p "$MCP_DIR"
+
+if [ -f "$MCP_SOURCE" ]; then
+    cp "$MCP_SOURCE" "$MCP_DEST"
+    echo -e "  ${GREEN}✓${NC} MCP server copied to $MCP_DIR"
+else
+    echo -e "  ${YELLOW}⚠${NC} MCP server source not found — skipping server copy"
+fi
+
+# Install MCP dependencies in the venv
+echo -e "  ${CYAN}➜${NC} Installing MCP dependencies (ddgs, beautifulsoup4)..."
+pip install ddgs beautifulsoup4 -q 2>&1 | grep -v "already satisfied"
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo -e "  ${YELLOW}⚠${NC} Failed to install MCP dependencies"
+else
+    echo -e "  ${GREEN}✓${NC} MCP dependencies installed"
+fi
+
+# Install Playwright Chromium browser
+echo -e "  ${CYAN}➜${NC} Installing Playwright Chromium browser..."
+python -m playwright install chromium 2>&1 | tail -1
+if [ ${PIPESTATUS[0]} -eq 0 ]; then
+    echo -e "  ${GREEN}✓${NC} Playwright Chromium installed"
+else
+    echo -e "  ${YELLOW}⚠${NC} Playwright Chromium installation failed"
+fi
+
+# Create MCP config file for MCP clients
+MCP_CONFIG_PATH="$HOME/.mcp_config.json"
+cat > "$MCP_CONFIG_PATH" <<EOF
+{
+    "mcpServers": {
+        "ultimate-mcp": {
+            "command": "python",
+            "args": [
+                "$MCP_DEST"
+            ],
+            "env": {}
+        }
+    }
+}
+EOF
+echo -e "  ${GREEN}✓${NC} MCP config written to $MCP_CONFIG_PATH"
+
+# Create launcher script
+LAUNCHER="$PWD/llama-mcp"
+cat > "$LAUNCHER" <<'EOF'
+#!/bin/bash
+# Ultimate MCP Server launcher
+echo "Starting Ultimate MCP Server..."
+echo "API docs: http://localhost:8000/docs"
+echo "Press Ctrl+C to stop"
+python "$HOME/.cache/llama-light/ultimate-mcp/server.py"
+EOF
+chmod +x "$LAUNCHER"
+echo -e "  ${GREEN}✓${NC} Launcher created: $LAUNCHER"
+
+# Create systemd service for MCP server
+if command -v systemctl >/dev/null 2>&1 && systemctl --user --version >/dev/null 2>&1; then
+    SVC_DIR="$HOME/.config/systemd/user"
+    SVC_PATH="$SVC_DIR/ultimate-mcp.service"
+    mkdir -p "$SVC_DIR"
+
+    cat > "$SVC_PATH" <<EOF
+[Unit]
+Description=Ultimate MCP Server for llama-light
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=python $MCP_DEST
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+    if systemctl --user daemon-reload && systemctl --user enable ultimate-mcp.service 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} MCP server systemd service installed (not started)"
+        echo -e "      Start: systemctl --user start ultimate-mcp.service"
+    fi
+fi
+
+echo -e "  ${CYAN}➜${NC} MCP Server Info:"
+echo -e "      API docs:  http://localhost:8000/docs"
+echo -e "      Start:     $PWD/llama-mcp"
+echo -e "      Stop:      Ctrl+C or kill the process"
+echo -e "  ${CYAN}➜${NC} To start the server:"
+echo -e "      llama config set default_model <your-model.gguf>"
+echo -e "      llama start"
+echo -e "  ${CYAN}➜${NC} Then run the MCP server:"
+echo -e "      $PWD/llama-mcp"
+echo -e "\\nFull installation log saved to: $LOG_FILE"

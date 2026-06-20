@@ -303,6 +303,86 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ── Done ──────────────────────────────────────────────────────────────────────
+
+# -- [7/6] Ultimate MCP Server Installation --
+Write-Step "Installing Ultimate MCP Server..."
+
+$MCP_DIR = "$CACHE_ROOT\ultimate-mcp"
+if (Test-Path $MCP_DIR) {
+    Remove-Item -Recurse -Force $MCP_DIR
+}
+New-Item -ItemType Directory -Force -Path $MCP_DIR | Out-Null
+
+# Copy the MCP server files from the project directory
+$MCP_SOURCE = Join-Path $PWD "llama_light" "ultimate_mcp_server.py"
+$MCP_DEST = Join-Path $MCP_DIR "server.py"
+
+if (Test-Path $MCP_SOURCE) {
+    Copy-Item -Path $MCP_SOURCE -Destination $MCP_DEST -Force
+    Write-Ok "MCP server copied to $MCP_DIR"
+} else {
+    Write-Warn "MCP server source not found -- skipping server copy"
+}
+
+# Install MCP dependencies in the venv
+Write-Info "Installing MCP dependencies (ddgs, beautifulsoup4)..."
+pip install ddgs beautifulsoup4 -q | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Warn "Failed to install MCP dependencies"
+} else {
+    Write-Ok "MCP dependencies installed"
+}
+
+# Install Playwright Chromium browser
+Write-Info "Installing Playwright Chromium browser..."
+python -m playwright install chromium 2>&1 | Out-Null
+if ($LASTEXITCODE -eq 0) {
+    Write-Ok "Playwright Chromium installed"
+} else {
+    Write-Warn "Playwright Chromium installation failed"
+}
+
+# Create MCP config file for MCP clients
+$MCP_CONFIG_PATH = Join-Path $env:USERPROFILE ".mcp_config.json"
+$MCP_CONFIG_CONTENT = @"
+{
+    "mcpServers": {
+        "ultimate-mcp": {
+            "command": "python",
+            "args": [
+                "$MCP_DEST"
+            ],
+            "env": {}
+        }
+    }
+}
+"@
+$MCP_CONFIG_CONTENT | Set-Content -Path $MCP_CONFIG_PATH -Force
+Write-Ok "MCP config written to $MCP_CONFIG_PATH"
+
+# Create a Windows shortcut for easy startup
+$SHORTCUT_NAME = "llama-mcp"
+$SHORTCUT_PATH = Join-Path $PWD "$SHORTCUT_NAME.ps1"
+$SHORTCUT_CONTENT = "@@"
+$SHORTCUT_CONTENT += "`# Ultimate MCP Server launcher`n"
+$SHORTCUT_CONTENT += "`$MCP_SERVER = `"" + $MCP_DEST + "`" `n"
+$SHORTCUT_CONTENT += "Write-Host `"Starting Ultimate MCP Server...`" -ForegroundColor Green`n"
+$SHORTCUT_CONTENT += "Write-Host `"API docs: http://localhost:8000/docs`" -ForegroundColor Cyan`n"
+$SHORTCUT_CONTENT += "Write-Host `"Press Ctrl+C to stop`" -ForegroundColor Yellow`n"
+$SHORTCUT_CONTENT += "python `$MCP_SERVER`n"
+$SHORTCUT_CONTENT += "@@"
+$SHORTCUT_CONTENT | Set-Content -Path $SHORTCUT_PATH -Force
+Write-Ok "Launcher created: $SHORTCUT_PATH"
+
+# Add MCP server startup info
+Write-Host ""
+Write-Host "  MCP Server Info:" -ForegroundColor Blue
+Write-Host "    API docs:  http://localhost:8000/docs"
+Write-Host "    Start:     `$PWD\$SHORTCUT_NAME.ps1"
+Write-Host "    Stop:      Ctrl+C or kill the process"
+
+Write-Host ""
+
 Write-Host ""
 Write-Host "✅ Installation complete!" -ForegroundColor $GREEN
 Write-Host ""
