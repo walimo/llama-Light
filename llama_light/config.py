@@ -307,7 +307,9 @@ class Config:
     @property
     def ctx(self)           -> int:           return int(self.get("ctx") or DEFAULT_CTX)
     @property
-    def ngl(self)           -> int:           return int(self.get("ngl") or DEFAULT_GPU_LAYERS)
+    def ngl(self)           -> int:
+        v = self.get("ngl")
+        return int(v) if v not in (None, 0, "") else DEFAULT_GPU_LAYERS
     @property
     def flash_attn(self)    -> str:           return str(self.get("flash_attn") or "on")
     @property

@@ -190,7 +190,7 @@ source "$VENV_DIR/bin/activate"
 
 # Install the package from current directory (no global npm modifications)
 pip install --upgrade pip -q
-pip install . -q || die "'pip install .' failed"
+pip install . --break-system-packages -q || die "'pip install .' failed"
 
 # Verify the installed binary exists before creating the symlink
 if ! [ -f "$VENV_DIR/bin/llama" ]; then
@@ -235,7 +235,7 @@ Description=llama-light server daemon
 After=network.target
 
 [Service]
-Type=forking
+Type=simple
 ExecStart=$HOME/.local/bin/llama _run
 PIDFile=$HOME/.cache/llama_light/server.pid
 KillMode=control-group

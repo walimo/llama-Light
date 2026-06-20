@@ -1,16 +1,14 @@
 # llama‑light
 
-**Ollama‑style CLI with direct `llama.cpp` performance** — no API overhead, full hardware auto‑detection, smart per‑model configuration.
+**Lightning‑fast local LLM inference** — direct `llama.cpp` server with zero API overhead, full hardware auto‑detection, and smart per‑model configuration.
 
 ## Features
-n- **Fixed restart bug**: systemd restart now works when service is stopped
 
-- **Ollama‑style CLI**: `run`, `pull`, `ls`, `rm`, `stop`
-- **All `llama-server` flags**: ctx, ngl, flash_attn, cache types, RoPE, YaRN, MoE, reasoning
-- **Hardware auto‑detection**: GPU, CPU → `cache_type`, `ngl`, `threads`
-- **Model registry**: scans Hugging Face cache, OCI manifests + blobs
-- **Multi‑model runner**: each model on its own port
-- **Systemd service**: `install.sh` auto-creates user service; `llama start/stop/restart` auto-detect systemd and delegate when active
+- **Zero‑overhead server**: Spawns `llama-server` directly — no Go daemon, no API middleware, no translation layer.
+- **All `llama-server` flags**: ctx, ngl, flash_attn, cache types, RoPE, YaRN, MoE, reasoning, reasoning_format, reasoning_budget
+- **Hardware auto‑detection**: GPU, CPU → `cache_type`, `ngl`, `threads`, `flash_attn`
+- **Model registry**: scans Hugging Face cache and local models with fuzzy matching
+- **Systemd service**: `install.sh` auto-creates user service; `llama start/stop/restart` delegates to systemd when active
 - **Personas**: `claude`, `hermes`, `hermes-desktop` with no sandbox, no login prompt
 - **Smart per‑model config**: auto‑detected defaults for reasoning models, user overrides persist per-model
 - **Token‑efficient defaults**: low temperature, tight top-p, repetition penalties for Opus/Anthropic-like behaviour
@@ -44,9 +42,9 @@ llama stop
 
 | Command | Description |
 |---------|-------------|
-| `llama start [--model ...]` | Start server (reads config, resolves model) |
-| `llama stop` | Stop server (SIGTERM or systemd) |
-| `llama kill` | Force-kill server (SIGKILL or systemd) |
+| `llama start` | Start server (reads config, resolves model) |
+| `llama stop` | Stop server (systemd or direct) |
+| `llama kill` | Force-kill server (systemd or direct) |
 | `llama restart` | Restart server (systemd or direct) |
 | `llama run --prompt "..."` | Single prompt (auto-starts server) |
 | `llama chat` | Interactive multi-turn chat |
@@ -104,7 +102,7 @@ Every model you load gets auto‑detected defaults based on its family:
 | **opus** (opus‑\*, claude‑\*) | 0.1 | 1 | 0.1 | 0.2 | 0.1 | 8192 |
 | **claude** (claude‑\*) | 0.1 | 1 | 0.1 | 0.3 | 0.2 | 8192 |
 | **codellama** (codellama‑\*) | 0.1 | 1 | 0.1 | 0.3 | 0.2 | 4096 |
-| **qwen** (qwen‑\*, qwen2\*‑\*) | 0.1 | 1 | 0.1 | 0.2 | 0.1 | 8192 |
+| **qwen** (qwen‑\*, qwen2\*- \*) | 0.1 | 1 | 0.1 | 0.2 | 0.1 | 8192 |
 | **default** (everything else) | 0.7 | 40 | 0.95 | 0.0 | 0.0 | 2048 |
 
 These settings produce **Opus/Anthropic‑like** behaviour: clear, concise, deterministic answers with minimal wasted tokens.
@@ -133,23 +131,23 @@ All settings live in `~/.config/llama_light/`:
 ## systemd Service
 
 The systemd service is auto-created by `install.sh`. It:
-- Runs `llama start` as the ExecStart command
-- Uses `Type=forking` + `PIDFile=` for process tracking
+- Runs `llama _run` as the ExecStart command
+- Uses `Type=simple` + `PIDFile=` for process tracking
 - Has `KillMode=control-group` for clean shutdown
-- Has `Restart=on-failure` with 10s delay
-- Uses `TimeoutStartSec=90` for model loading
+- Has `Restart=no` (no auto-restart)
+- Has `TimeoutStartSec=300` for model loading
+- Has `KillSignal=SIGKILL`
 
 To change settings: `llama config set <key> <value>` then `llama restart`.
 
-## Performance vs Ollama
+## Performance
 
-| Metric | llama‑light | Ollama |
-|--------|-------------|--------|
-| Architecture | Direct llama‑server call | Go server + API |
+| Metric | llama‑light | Traditional wrapper |
+|--------|-------------|-------------------|
+| Architecture | Direct `llama-server` subprocess | Go wrapper + API layer |
 | Added latency | ~1‑2 ms | 20‑50 ms |
-| Throughput (concurrent) | Same as llama.cpp | Up to 19× slower |
 | Memory overhead | 0 MB (when stopped) | 200‑500 MB daemon |
-| GPU utilisation | 100% | Often falls back to CPU |
+| GPU utilisation | 100% via GPU layers | Often falls back to CPU |
 | Time to first token | Same as llama.cpp | ~40% longer |
 
 ## Developer Blueprint

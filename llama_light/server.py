@@ -218,7 +218,7 @@ def start(
         "-ngl",          str(m_ngl),
         "--parallel",    str(cfg.parallel),
         "--flash-attn",  "on" if str(m_flash).lower() not in ("off", "false", "0") else "off",
-        "--tools",       str(cfg.get("tools", "all")),
+        "--tools",       str(cfg.get("tools")),
         "-b",            str(m_batch),
         "--ubatch-size", str(cfg.ubatch_size),
         "--threads",     str(m_threads),
@@ -273,7 +273,7 @@ def start(
             args += [flag, str(val)]
 
     # MoE
-    if cfg.get("cpu_moe", False):
+    if cfg.get("cpu_moe"):
         args.append("--cpu-moe")
     if cfg.get("n_cpu_moe"):
         args += ["--n-cpu-moe", str(cfg.get("n_cpu_moe"))]
@@ -694,19 +694,19 @@ def chat_messages(
     # from the canonical config source.
     cfg = get_config()
     if temperature is _CHAT_NOT_SET:
-        temperature = cfg.get("temperature", 0.7)
+        temperature = cfg.get("temperature")
     if top_k is _CHAT_NOT_SET:
-        top_k = cfg.get("top_k", 20)
+        top_k = cfg.get("top_k")
     if max_tokens is _CHAT_NOT_SET:
-        max_tokens = cfg.get("max_tokens", 4096)
+        max_tokens = cfg.get("max_tokens")
     if top_p is _CHAT_NOT_SET:
-        top_p = cfg.get("top_p", 0.95)
+        top_p = cfg.get("top_p")
     if min_p is _CHAT_NOT_SET:
-        min_p = cfg.get("min_p", 0.05)
+        min_p = cfg.get("min_p")
     if frequency_penalty is _CHAT_NOT_SET:
-        frequency_penalty = cfg.get("frequency_penalty", 0.0)
+        frequency_penalty = cfg.get("frequency_penalty")
     if presence_penalty is _CHAT_NOT_SET:
-        presence_penalty = cfg.get("presence_penalty", 0.0)
+        presence_penalty = cfg.get("presence_penalty")
 
     payload = json.dumps({
         "messages":            messages,

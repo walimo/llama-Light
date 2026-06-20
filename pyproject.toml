@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "llama-light"
 version = "0.2.1"
-description = "Lightweight llama.cpp wrapper — Ollama-style CLI"
+description = "Lightning-fast local LLM inference — direct llama.cpp server"
 requires-python = ">=3.8"
 authors = [
     {name = "walimo", email = "walimo@example.com"}
