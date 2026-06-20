@@ -17,6 +17,7 @@
 - **Web UI**: `llama webui` — opens llama.cpp chat UI in your browser
 - **Robust binary resolution**: Multi-strategy llama-server detection via `_bincheck`
 - **Graceful shutdown**: Clean server stop on SIGTERM/SIGINT
+- **MCP server**: 35+ built-in tools (browser, terminal, search, files) — auto-installed with `install.sh`/`install.ps1` and pre-configured for llama-ui WebUI integration
 
 ## Installation
 
@@ -79,6 +80,38 @@ llama ps
 llama service        # show systemd unit status
 llama stop
 ```
+
+## MCP Server
+
+The installer automatically sets up the **Ultimate MCP Server** — a 35+ tool suite for browser automation, terminal access, web search, file operations, and more.
+
+**After one-liner install, it's ready to use:**
+
+**Linux**
+```bash
+# Start the MCP server
+./llama-mcp
+# Or via systemd (auto-starts on boot)
+systemctl --user start ultimate-mcp.service
+```
+
+**Windows**
+```powershell
+# Start the MCP server
+.\llama-mcp.ps1
+```
+
+**llama-ui WebUI integration:** The installer creates `~/.mcp_config.json` automatically. When you open llama-ui's WebUI, the built-in MCP client detects the server at `http://localhost:8000` and the tools are available inside the chat interface — no manual setup needed.
+
+**What's included:**
+- Browser automation (Playwright Chromium)
+- Terminal/SSH access
+- Web search (DuckDuckGo)
+- File read/write/patch
+- Session search
+- And 30+ more tools
+
+**API docs:** `http://localhost:8000/docs`
 
 ## Commands
 
