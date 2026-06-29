@@ -358,7 +358,7 @@ def build_from_source(version: str, cache_dir: str, compute_cap: str) -> bool:
         
         # ── CMake configuration ───────────────────────────────────────────
         if not run_with_progress(
-            ["cmake", "..", "-DGGML_CUDA=ON",
+            ["cmake", "..", "-DGGML_CUDA=ON", "-DLLAMA_BUILD_UI=ON",
              f"-DCMAKE_CUDA_ARCHITECTURES={sm}" if sm != "120" else "-DGGML_NATIVE=ON",
              "-DCMAKE_BUILD_TYPE=Release"],
             build_dir,
