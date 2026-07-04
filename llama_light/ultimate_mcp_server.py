@@ -43,27 +43,7 @@ try:
     DDGS_AVAILABLE = True
 except ImportError:
     DDGS_AVAILABLE = False
-    DDGS_AVAILABLE = True
-except ImportError:
-    DDGS_AVAILABLE = False
-try:
-    from ddgs import DDGS as DDGS_LIB
-    DDGS_AVAILABLE = True
-except ImportError:
-    DDGS_AVAILABLE = False
-    DDGS_AVAILABLE = True
-except ImportError:
-    DDGS_AVAILABLE = False
-try:
-    from ddgs import DDGS as DDGS_LIB
-    DDGS_AVAILABLE = True
-except ImportError:
-    DDGS_AVAILABLE = False
-try:
-    from ddgs import DDGS as DDGS_LIB
-    DDGS_AVAILABLE = True
-except ImportError:
-    DDGS_AVAILABLE = False
+
 try:
     import sqlite3
     SQLITE_AVAILABLE = True
@@ -155,9 +135,11 @@ logger = logging.getLogger("ultimate-mcp")
 
 app = FastAPI(title=SERVER_NAME, description="Ultimate AI Operations Suite", version=SERVER_VERSION)
 
+# Restrict CORS to localhost for MCP server usage.
+# The MCP protocol runs locally, so wildcard origins are unnecessary.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost", "https://localhost", "http://127.0.0.1", "https://127.0.0.1"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -428,7 +410,6 @@ def google_custom_search(query: str, num_results: int = 5) -> Optional[List[Dict
     """Google Custom Search API."""
     if not GOOGLE_API_KEY or GOOGLE_API_KEY == "":
         return None
-        return None
     url = f"https://www.googleapis.com/customsearch/v1?key={GOOGLE_API_KEY}&cx={GOOGLE_CX}&q={urllib.parse.quote(query)}&num={min(num_results, 10)}"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'UltimateMCP/4.0'})
@@ -499,7 +480,23 @@ def perform_search(query: str, engine: str = "auto", max_results: int = 5) -> Di
 def safe_execute(command: str, timeout: int = 30, shell: bool = True,
                  capture_output: bool = True, text: bool = True,
                  env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    """Execute shell command safely."""
+    """Execute shell command safely.
+
+    When shell=True, the command is validated against a whitelist of
+    allowed shell metacharacters to prevent injection attacks.
+    """
+    if shell:
+        # Only allow safe characters in shell mode: alphanumerics, spaces,
+        # dots, slashes, hyphens, underscores, colons, equals, commas,
+        # plus, percent, asterisk (glob), question mark (glob),
+        # parentheses (subshell), pipes (|), redirects (>, <), ampersand (&)
+        if not re.match(r'^[a-zA-Z0-9_\-./ :|=,;{}()\[\]<>|&"\']+$', command):
+            return {
+                "stdout": "", "stderr": "Command contains disallowed characters",
+                "return_code": -1, "success": False,
+                "timestamp": datetime.now().isoformat()
+            }
+
     try:
         result = subprocess.run(command, shell=shell, capture_output=capture_output,
                                 text=text, timeout=timeout, env=env, input=None)
@@ -548,6 +545,11 @@ def write_file_safe(path: str, content: str, create_dirs: bool = True) -> Dict[s
 def search_codebase(directory: str, pattern: str,
                     extensions: Optional[List[str]] = None, max_results: int = 100) -> Dict[str, Any]:
     try:
+        # Validate inputs to prevent shell injection
+        if not re.match(r'^[a-zA-Z0-9_\-./ ]+$', directory):
+            return {"success": False, "error": "Invalid directory path", "timestamp": datetime.now().isoformat()}
+        if not re.match(r'^[a-zA-Z0-9_\-.*? ]+$', pattern):
+            return {"success": False, "error": "Invalid search pattern", "timestamp": datetime.now().isoformat()}
         result = subprocess.run(
             f"grep -r -l '{pattern}' '{directory}' 2>/dev/null | head -{max_results}",
             shell=True, capture_output=True, text=True, timeout=15)
@@ -560,6 +562,15 @@ def search_codebase(directory: str, pattern: str,
 
 def git_operation(repo_path: str, operation: str, **kwargs) -> Dict[str, Any]:
     try:
+        # Validate inputs to prevent shell injection
+        if not re.match(r'^[a-zA-Z0-9_\-./ ]+$', repo_path):
+            return {"success": False, "error": "Invalid repository path", "timestamp": datetime.now().isoformat()}
+
+        allowed_operations = {"status", "log", "diff", "branches", "remote", "commit", "push"}
+        if operation not in allowed_operations:
+            return {"success": False, "error": f"Operation '{operation}' not allowed. Allowed: {allowed_operations}",
+                    "timestamp": datetime.now().isoformat()}
+
         commands = {
             "status": f"cd '{repo_path}' && git status --short",
             "log": f"cd '{repo_path}' && git log --oneline -10",
@@ -568,11 +579,14 @@ def git_operation(repo_path: str, operation: str, **kwargs) -> Dict[str, Any]:
             "remote": f"cd '{repo_path}' && git remote -v",
         }
         if operation == "commit":
-            cmd = f"cd '{repo_path}' && git add . && git commit -m '{kwargs.get('message', 'Auto-commit')}'"
+            message = kwargs.get('message', 'Auto-commit')
+            if not re.match(r'^[a-zA-Z0-9_\-./ :]+$', message):
+                return {"success": False, "error": "Invalid commit message", "timestamp": datetime.now().isoformat()}
+            cmd = f"cd '{repo_path}' && git add . && git commit -m '{message}'"
         elif operation == "push":
             cmd = f"cd '{repo_path}' && git push"
         else:
-            cmd = commands.get(operation, f"cd '{repo_path}' && git {operation}")
+            cmd = commands.get(operation) or f"cd '{repo_path}' && git {operation}"
         return safe_execute(cmd, timeout=30)
     except Exception as e:
         return {"success": False, "error": str(e)}

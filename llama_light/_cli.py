@@ -166,11 +166,15 @@ def _ensure_server_or_start(args: argparse.Namespace) -> bool:
 
     if _systemd_unit_exists():
         print("[info] server not running — starting llama-server.service")
-        subprocess.run(["systemctl", "--user", "start", "llama-server.service"])
+        result = subprocess.run(["systemctl", "--user", "start", "llama-server.service"],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[error] failed to start systemd service: {result.stderr.strip()}")
+            sys.exit(1)
         deadline = time.time() + 180
         while time.time() < deadline:
             if _health(cfg.host, cfg.port):
-                return
+                return True
             print(".", end="", flush=True)
             time.sleep(0.5)
         print("[warn] server did not become healthy in time — "
@@ -184,7 +188,13 @@ def _ensure_server_or_start(args: argparse.Namespace) -> bool:
         sys.exit(1)
     args.model = model
     model_path = _resolve_model_arg(args)
-    start(model_path=model_path, **_resolve_server_args(args))
+    try:
+        start(model_path=model_path, **_resolve_server_args(args))
+    except RuntimeError as e:
+        print(f"[error] failed to start server: {e}")
+        sys.exit(1)
+
+    return True
 
 
 def _server_env() -> Dict[str, str]:
@@ -561,6 +571,9 @@ def cmd_hermes(args):
         subprocess.run([hermes_bin], env=env, stdin=None, stdout=None, stderr=None)
     except KeyboardInterrupt:
         print("\n[hermes] exited")
+    except FileNotFoundError:
+        print(f"[error] hermes binary not found: {hermes_bin}")
+        sys.exit(1)
 
 
 def cmd_hermes_desktop(args):
