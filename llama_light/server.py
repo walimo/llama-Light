@@ -765,6 +765,14 @@ def install_service() -> None:
     import shutil as _shutil
     llama_bin = _shutil.which("llama") or f"{sys.executable} -m llama_light"
 
+    # Detect CUDA path — /usr/local/cuda is a symlink created by install.sh
+    cuda_path = "/usr/local/cuda/lib64"
+    if not os.path.exists(cuda_path):
+        for alt in ["/usr/local/cuda-12/lib64", "/usr/local/cuda-11/lib64"]:
+            if os.path.exists(alt):
+                cuda_path = alt
+                break
+
     svc = "\n".join([
         "[Unit]",
         "Description=llama-light server daemon",
@@ -774,10 +782,12 @@ def install_service() -> None:
         "Type=simple",
         f"ExecStart={llama_bin} _run",
         "KillMode=control-group",
-        "TimeoutStopSec=10",
+        "KillSignal=SIGTERM",
+        "TimeoutStopSec=5",
         "TimeoutStartSec=300",
         "Environment=PATH=" + os.path.expanduser("~/.local/bin")
             + ":/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
+        f"Environment=LD_LIBRARY_PATH={cuda_path}",
         "",
         "[Install]",
         "WantedBy=default.target",

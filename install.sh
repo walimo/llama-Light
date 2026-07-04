@@ -192,8 +192,26 @@ source "$VENV_DIR/bin/activate"
 pip install --upgrade pip -q
 pip install . --break-system-packages -q || die "'pip install .' failed"
 
-# Verify the installed binary exists before creating the symlink
-if ! [ -f "$VENV_DIR/bin/llama" ]; then
+# Verify the installed binary exists AND has content (not just existence)
+if [ -f "$VENV_DIR/bin/llama" ]; then
+    FILE_SIZE=$(stat -c%s "$VENV_DIR/bin/llama" 2>/dev/null || echo "0")
+    if [ "$FILE_SIZE" -lt 10 ]; then
+        echo -e "  ${YELLOW}⚠${NC} Entry point is empty (${FILE_SIZE} bytes) — regenerating..."
+        cat > "$VENV_DIR/bin/llama" << 'PYEOF'
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import re, sys
+from llama_light._cli import main
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(main())
+PYEOF
+        chmod +x "$VENV_DIR/bin/llama"
+        echo -e "  ${GREEN}✓${NC} Entry point regenerated"
+    else
+        echo -e "  ${GREEN}✓${NC} Entry point valid (${FILE_SIZE} bytes)"
+    fi
+else
     die "Expected binary not found at $VENV_DIR/bin/llama — pip install may have failed silently"
 fi
 
@@ -239,11 +257,12 @@ Type=simple
 ExecStart=$HOME/.local/bin/llama _run
 PIDFile=$HOME/.cache/llama_light/server.pid
 KillMode=control-group
-KillSignal=SIGKILL
+KillSignal=SIGTERM
 TimeoutStopSec=5
 TimeoutStartSec=300
 Restart=no
 Environment=PATH=$HOME/.local/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin
+Environment=LD_LIBRARY_PATH=/usr/local/cuda/lib64
 
 [Install]
 WantedBy=default.target

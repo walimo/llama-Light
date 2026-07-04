@@ -155,15 +155,15 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "repack":           True,
         # Attention / KV
         "flash_attn":       "on",
-        "cache_type_k":     "q4_0",
-        "cache_type_v":     "q4_0",
+        "cache_type_k":     "q8_0",
+        "cache_type_v":     "q8_0",
         # Threading
         "threads":          threads,
         "threads_batch":    threads,
         # Generation
-        "temperature":      0.6,
+        "temperature":      0.7,
         "top_k":            20,
-        "max_tokens":       4096,
+        "max_tokens":       16384,
         "predict":          -1,
         "keep":             0,
         # Memory
@@ -195,7 +195,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "ui_mcp_proxy":     "on",
         "tools":            "all",
         # Reasoning
-        "reasoning":        True,
+        "reasoning":        False,
         "reasoning_format": "deepseek",
         "reasoning_budget": 256,
         # Profile
