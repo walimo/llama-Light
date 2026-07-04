@@ -162,10 +162,15 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "threads_batch":    threads,
         # Generation
         "temperature":      0.7,
-        "top_k":            20,
+        "top_k":            40,
+        "top_p":            0.9,
+        "min_p":            0.05,
         "max_tokens":       16384,
         "predict":          -1,
         "keep":             0,
+        # Penalty
+        "frequency_penalty": 0.1,
+        "presence_penalty":  0.5,
         # Memory
         "mlock":            False,
         "mmap":             True,
