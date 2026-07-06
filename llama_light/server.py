@@ -209,6 +209,7 @@ def start(
     m_freq_p   = model_cfg.get("frequency_penalty", cfg.get("frequency_penalty"))
     m_top_k    = model_cfg.get("top_k", cfg.get("top_k"))
 
+    # ── Build command line from config ──────────────────────────────────
     args = [
         bin_path,
         "-m",            model_path,
@@ -341,6 +342,267 @@ def start(
         args += ["--frequency-penalty", str(m_freq_p)]
     if m_top_k is not None:
         args += ["--top-k", str(m_top_k)]
+
+    # ── Additional sampling flags ───────────────────────────────────────
+    typical_p = cfg.get("typical_p")
+    if typical_p is not None and float(typical_p) != 1.0:
+        args += ["--typical-p", str(typical_p)]
+    top_n_sigma = cfg.get("top_n_sigma")
+    if top_n_sigma is not None and float(top_n_sigma) != -1.0:
+        args += ["--top-n-sigma", str(top_n_sigma)]
+    xtc_prob = cfg.get("xtc_probability")
+    if xtc_prob is not None and float(xtc_prob) > 0:
+        args += ["--xtc-probability", str(xtc_prob)]
+    xtc_thresh = cfg.get("xtc_threshold")
+    if xtc_thresh is not None and float(xtc_thresh) > 0:
+        args += ["--xtc-threshold", str(xtc_thresh)]
+
+    # DRY sampling
+    dry_mult = cfg.get("dry_multiplier")
+    if dry_mult is not None and float(dry_mult) > 0:
+        args += ["--dry-multiplier", str(dry_mult)]
+    dry_base = cfg.get("dry_base")
+    if dry_base is not None and float(dry_base) != 1.75:
+        args += ["--dry-base", str(dry_base)]
+    dry_len = cfg.get("dry_allowed_length")
+    if dry_len is not None and int(dry_len) != 2:
+        args += ["--dry-allowed-length", str(dry_len)]
+    dry_pen = cfg.get("dry_penalty_last_n")
+    if dry_pen is not None and int(dry_pen) != -1:
+        args += ["--dry-penalty-last-n", str(dry_pen)]
+    dry_seq = cfg.get("dry_sequence_breaker")
+    if dry_seq:
+        args += ["--dry-sequence-breaker", str(dry_seq)]
+
+    # Adaptive / dynamic temperature
+    adapt_tgt = cfg.get("adaptive_target")
+    if adapt_tgt is not None and float(adapt_tgt) >= 0:
+        args += ["--adaptive-target", str(adapt_tgt)]
+    adapt_dec = cfg.get("adaptive_decay")
+    if adapt_dec is not None and float(adapt_dec) > 0:
+        args += ["--adaptive-decay", str(adapt_dec)]
+    dyn_range = cfg.get("dynatemp_range")
+    if dyn_range is not None and float(dyn_range) > 0:
+        args += ["--dynatemp-range", str(dyn_range)]
+    dyn_exp = cfg.get("dynatemp_exp")
+    if dyn_exp is not None and float(dyn_exp) != 1.0:
+        args += ["--dynatemp-exp", str(dyn_exp)]
+
+    # Mirostat
+    mirostat = cfg.get("mirostat")
+    if mirostat is not None and int(mirostat) > 0:
+        args += ["--mirostat", str(mirostat)]
+        args += ["--mirostat-lr", str(cfg.get("mirostat_lr"))]
+        args += ["--mirostat-ent", str(cfg.get("mirostat_ent"))]
+
+    # Speculative decoding
+    spec_type = cfg.get("spec_type")
+    if spec_type:
+        args += ["--spec-type", str(spec_type)]
+    spec_n_max = cfg.get("spec_draft_n_max")
+    if spec_n_max is not None and int(spec_n_max) > 0:
+        args += ["--spec-draft-n-max", str(spec_n_max)]
+    spec_n_min = cfg.get("spec_draft_n_min")
+    if spec_n_min is not None and int(spec_n_min) > 0:
+        args += ["--spec-draft-n-min", str(spec_n_min)]
+    spec_p_split = cfg.get("spec_draft_p_split")
+    if spec_p_split is not None and float(spec_p_split) > 0:
+        args += ["--spec-draft-p-split", str(spec_p_split)]
+    spec_p_min = cfg.get("spec_draft_p_min")
+    if spec_p_min is not None and float(spec_p_min) > 0:
+        args += ["--spec-draft-p-min", str(spec_p_min)]
+
+    # Chat / template
+    chat_kwargs = cfg.get("chat_template_kwargs")
+    if chat_kwargs:
+        args += ["--chat-template-kwargs", str(chat_kwargs)]
+    if cfg.get("skip_chat_parsing"):
+        args.append("--skip-chat-parsing")
+    if not cfg.get("prefill_assistant", True):
+        args.append("--no-prefill-assistant")
+
+    # Server features
+    if not cfg.get("ui", True):
+        args.append("--no-ui")
+    if cfg.get("embedding"):
+        args.append("--embedding")
+    if cfg.get("rerank"):
+        args.append("--rerank")
+    if not cfg.get("cache_prompt", True):
+        args.append("--no-cache-prompt")
+    cache_reuse = cfg.get("cache_reuse")
+    if cache_reuse is not None and int(cache_reuse) > 0:
+        args += ["--cache-reuse", str(cache_reuse)]
+    if cfg.get("cache_idle_slots"):
+        args.append("--cache-idle-slots")
+    if cfg.get("context_shift"):
+        args.append("--context-shift")
+    if not cfg.get("slots", True):
+        args.append("--no-slots")
+    slot_save = cfg.get("slot_save_path")
+    if slot_save:
+        args += ["--slot-save-path", str(slot_save)]
+    if cfg.get("metrics"):
+        args.append("--metrics")
+    if cfg.get("props"):
+        args.append("--props")
+    sse_ping = cfg.get("sse_ping_interval")
+    if sse_ping is not None and int(sse_ping) > 0:
+        args += ["--sse-ping-interval", str(sse_ping)]
+    threads_http = cfg.get("threads_http")
+    if threads_http is not None and int(threads_http) > 0:
+        args += ["--threads-http", str(threads_http)]
+
+    # Fit / memory
+    if not cfg.get("fit", True):
+        args.append("--no-fit")
+    fit_target = cfg.get("fit_target")
+    if fit_target is not None and int(fit_target) != 1024:
+        args += ["--fit-target", str(fit_target)]
+    fit_ctx = cfg.get("fit_ctx")
+    if fit_ctx is not None and int(fit_ctx) != 4096:
+        args += ["--fit-ctx", str(fit_ctx)]
+
+    # UI / web
+    ui_config = cfg.get("ui_config")
+    if ui_config:
+        args += ["--ui-config", str(ui_config)]
+    path = cfg.get("path")
+    if path:
+        args += ["--path", str(path)]
+    api_prefix = cfg.get("api_prefix")
+    if api_prefix:
+        args += ["--api-prefix", str(api_prefix)]
+
+    # Logging
+    if cfg.get("log_disable"):
+        args.append("--log-disable")
+    log_file_cli = cfg.get("log_file")
+    if log_file_cli:
+        args += ["--log-file", str(log_file_cli)]
+    log_colors = cfg.get("log_colors")
+    if log_colors and str(log_colors).lower() not in ("auto", "none", ""):
+        args += ["--log-colors", str(log_colors)]
+    if cfg.get("offline"):
+        args.append("--offline")
+    if cfg.get("log_prefix"):
+        args.append("--log-prefix")
+    if cfg.get("log_timestamps"):
+        args.append("--log-timestamps")
+    log_verbosity = cfg.get("log_verbosity")
+    if log_verbosity is not None and int(log_verbosity) != 3:
+        args += ["--log-verbosity", str(log_verbosity)]
+
+    # Auth / SSL
+    api_key = cfg.get("api_key")
+    if api_key:
+        args += ["--api-key", str(api_key)]
+    api_key_file = cfg.get("api_key_file")
+    if api_key_file:
+        args += ["--api-key-file", str(api_key_file)]
+    ssl_key = cfg.get("ssl_key_file")
+    if ssl_key:
+        args += ["--ssl-key-file", str(ssl_key)]
+    ssl_cert = cfg.get("ssl_cert_file")
+    if ssl_cert:
+        args += ["--ssl-cert-file", str(ssl_cert)]
+
+    # Misc
+    seed = cfg.get("seed")
+    if seed is not None and int(seed) >= 0:
+        args += ["--seed", str(seed)]
+    if cfg.get("ignore_eos"):
+        args.append("--ignore-eos")
+
+    # Samplers / grammar
+    samplers = cfg.get("samplers")
+    if samplers:
+        args += ["--samplers", str(samplers)]
+    sampler_seq = cfg.get("sampler_seq")
+    if sampler_seq:
+        args += ["--sampler-seq", str(sampler_seq)]
+    grammar = cfg.get("grammar")
+    if grammar:
+        args += ["--grammar", str(grammar)]
+    grammar_file = cfg.get("grammar_file")
+    if grammar_file:
+        args += ["--grammar-file", str(grammar_file)]
+    json_schema = cfg.get("json_schema")
+    if json_schema:
+        args += ["--json-schema", str(json_schema)]
+    json_schema_file = cfg.get("json_schema_file")
+    if json_schema_file:
+        args += ["--json-schema-file", str(json_schema_file)]
+
+    # Model / LoRA
+    lora = cfg.get("lora")
+    if lora:
+        args += ["--lora", str(lora)]
+    lora_scaled = cfg.get("lora_scaled")
+    if lora_scaled:
+        args += ["--lora-scaled", str(lora_scaled)]
+    cv = cfg.get("control_vector")
+    if cv:
+        args += ["--control-vector", str(cv)]
+    cv_scaled = cfg.get("control_vector_scaled")
+    if cv_scaled:
+        args += ["--control-vector-scaled", str(cv_scaled)]
+    cv_range = cfg.get("control_vector_layer_range")
+    if cv_range:
+        args += ["--control-vector-layer-range", str(cv_range)]
+
+    # Media / multimodal
+    media_path = cfg.get("media_path")
+    if media_path:
+        args += ["--media-path", str(media_path)]
+    if not cfg.get("mmproj_auto", True):
+        args.append("--no-mmproj-auto")
+    if not cfg.get("mmproj_offload", True):
+        args.append("--no-mmproj-offload")
+    img_min = cfg.get("image_min_tokens")
+    if img_min is not None:
+        args += ["--image-min-tokens", str(img_min)]
+    img_max = cfg.get("image_max_tokens")
+    if img_max is not None:
+        args += ["--image-max-tokens", str(img_max)]
+
+    # Pooling / embeddings
+    pooling = cfg.get("pooling")
+    if pooling:
+        args += ["--pooling", str(pooling)]
+    embd_norm = cfg.get("embd_normalize")
+    if embd_norm is not None and int(embd_norm) != 2:
+        args += ["--embd-normalize", str(embd_norm)]
+
+    # Tags
+    tags = cfg.get("tags")
+    if tags:
+        args += ["--tags", str(tags)]
+
+    # Warmup / spm
+    if not cfg.get("warmup", True):
+        args.append("--no-warmup")
+    if cfg.get("spm_infill"):
+        args.append("--spm-infill")
+
+    # CPU affinity / priority (add after MoE block)
+    if cfg.get("cpu_strict"):
+        args.append("--cpu-strict")
+    if cfg.get("cpu_strict_batch"):
+        args.append("--cpu-strict-batch")
+    if cfg.get("prio", 0) != 0:
+        args += ["--prio", str(cfg.get("prio"))]
+    if cfg.get("prio_batch", 0) != 0:
+        args += ["--prio-batch", str(cfg.get("prio_batch"))]
+    if cfg.get("poll", 50) != 50:
+        args += ["--poll", str(cfg.get("poll"))]
+    if cfg.get("poll_batch", 50) != 50:
+        args += ["--poll-batch", str(cfg.get("poll_batch"))]
+
+    # reasoning budget message (add after reasoning block)
+    rb_msg = model_cfg.get("reasoning_budget_message", cfg.get("reasoning_budget_message"))
+    if rb_msg:
+        args += ["--reasoning-budget-message", str(rb_msg)]
 
     if extra_args:
         args += extra_args

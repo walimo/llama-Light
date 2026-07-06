@@ -168,14 +168,11 @@ def auto_detect_config(model_name: str) -> Dict[str, Any]:
 
 
 def get_model_config(model_name: str) -> Dict[str, Any]:
-    """Get a model's effective config, merged from:
+    """Get a model's effective config.
 
-    1. Auto-detected defaults (based on model family)
-    2. Saved model config (user overrides, persisted)
-
-    User's saved settings always win — they override auto-detection.
+    Only returns per-model overrides that the user has explicitly saved.
+    Auto-detection is NOT applied here — global config is the single source
+    of truth. Per-model settings only override what the user explicitly sets.
     """
-    auto = auto_detect_config(model_name)
     saved = load_model_config(model_name)
-    auto.update(saved)
-    return auto
+    return saved

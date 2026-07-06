@@ -1,4 +1,5 @@
 # llama_light/_cli.py
+import re
 import argparse
 import os
 import subprocess
@@ -15,7 +16,7 @@ from .server import (
 from .model_manager import pull, ls, rm
 from .config import (
     CACHE_ROOT, LLAMA_SERVER_BIN, LOG_DIR, HF_CACHE_DIR,
-    get_config,
+    get_config, _CONFIG_SECTIONS, _INT_KEYS, _FLOAT_KEYS, _BOOL_KEYS, _STRING_NONE_KEYS,
 )
 from .registry import find, scan_hf_cache
 from ._bincheck import check, status as _bincheck_status
@@ -809,11 +810,107 @@ def cmd_config(_args):
 
 
 def cmd_config_show(_args):
+    """Show current config grouped by section, with modified settings first."""
     cfg = get_config()
-    print(f"{'KEY':<25} VALUE")
-    print("-" * 55)
-    for k, v in sorted(cfg.all().items()):
-        print(f"{k:<25} {v}")
+    defaults = cfg.all()
+
+    # Build section mapping
+    sections = {}
+    for heading, entries in _CONFIG_SECTIONS.items():
+        section_name = heading.split(" ──")[0].strip().replace("── ", "")
+        sections[section_name] = entries
+
+    # Collect all keys and their descriptions
+    all_keys = {}
+    for entries in sections.values():
+        for key, desc in entries:
+            all_keys[key] = desc
+
+    # Identify modified keys (value differs from default)
+    modified_keys = []
+    for key in all_keys:
+        current = cfg.get(key)
+        default = defaults.get(key)
+        if current != default:
+            modified_keys.append(key)
+    modified_keys.sort()
+
+    # ANSI codes
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+    DIM = "\033[2m"
+    WHITE = "\033[97m"
+    YELLOW = "\033[93m"
+    CYAN = "\033[96m"
+    GREEN = "\033[92m"
+    MAGENTA = "\033[95m"
+
+    KEY_WIDTH = 28
+    VALUE_WIDTH = 12
+    TYPE_WIDTH = 6
+    DESC_START = 48
+
+    def type_name(key):
+        if key in _INT_KEYS: return "int"
+        elif key in _FLOAT_KEYS: return "float"
+        elif key in _BOOL_KEYS: return "bool"
+        elif key in _STRING_NONE_KEYS: return "string"
+        else: return "any"
+
+    def type_color(key):
+        if key in _INT_KEYS: return CYAN
+        elif key in _FLOAT_KEYS: return MAGENTA
+        elif key in _BOOL_KEYS: return GREEN
+        elif key in _STRING_NONE_KEYS: return WHITE
+        else: return DIM
+
+    def format_value(val):
+        if val is None: return "None"
+        if isinstance(val, bool): return ("True" if val else "False")
+        s = str(val)
+        if len(s) > VALUE_WIDTH:
+            if "/" in s: s = s.rsplit("/", 1)[-1]
+            else: s = s[:VALUE_WIDTH - 3] + "..."
+        return s
+
+    # Print modified settings section if any
+    if modified_keys:
+        print(f"\n{BOLD}Modified Settings{RESET}")
+        for key in modified_keys:
+            value = cfg.get(key)
+            val_str = format_value(value)
+            desc = all_keys.get(key, "")
+            tc = type_color(key)
+            line = f"{BOLD}{key:<{KEY_WIDTH}}{RESET}"
+            line += f"{YELLOW}{val_str:<{VALUE_WIDTH}} {RESET}"
+            line += f"{tc}{type_name(key):<{TYPE_WIDTH}}{RESET}"
+            line += " " * max(0, DESC_START - len(re.sub(r"\033\[[0-9;]*m", "", line)))
+            line += f"{DIM}{desc}{RESET}"
+            print(line)
+        print()
+
+    # Print all sections in order — header only on first section
+    for i, (section_name, entries) in enumerate(sections.items()):
+        sorted_entries = sorted(entries, key=lambda x: x[0])
+        print(f"{DIM}{'═' * 120}{RESET}")
+        print(f"\033[1;91m{section_name}\033[0m")
+        if i == 0:
+            hdr = f"{BOLD}{'Key':<{KEY_WIDTH}}{RESET}{BOLD}{'Value':<{VALUE_WIDTH}}{RESET}{BOLD}{'Type':<{TYPE_WIDTH}}{RESET}"
+            hdr += " " * max(0, DESC_START - len(re.sub(r"\033\[[0-9;]*m", "", hdr)))
+            hdr += f"{BOLD}Description{RESET}"
+            print(hdr)
+        for key, desc in sorted_entries:
+            value = cfg.get(key)
+            default = defaults.get(key)
+            val_str = format_value(value)
+            color = YELLOW if value != default else WHITE
+            tc = type_color(key)
+            line = f"{BOLD}{key:<{KEY_WIDTH}}{RESET}"
+            line += f"{color}{val_str:<{VALUE_WIDTH}} {RESET}"
+            line += f"{tc}{type_name(key):<{TYPE_WIDTH}}{RESET}"
+            line += " " * max(0, DESC_START - len(re.sub(r"\033\[[0-9;]*m", "", line)))
+            line += f"{DIM}{desc}{RESET}"
+            print(line)
 
 
 def cmd_config_set(args):
