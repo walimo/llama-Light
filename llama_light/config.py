@@ -387,8 +387,11 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
 
     if cpu_cores <= 4:
         threads = cpu_cores
+    elif cpu_cores <= 8:
+        # 4P+4E or 4C/8T hyperthreaded — use physical core count to avoid SMT contention
+        threads = max(cpu_cores // 2, 4)
     else:
-        threads = min(cpu_cores, 16)
+        threads = min(cpu_cores // 2, 16)
 
     return {
         "host":             "127.0.0.1",
@@ -412,7 +415,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "threads_batch":    threads,
         "poll":             50,
         "poll_batch":       50,
-        "prio":             0,
+        "prio":             2,
         "prio_batch":       0,
         "cpu_strict":       False,
         "cpu_strict_batch": False,
@@ -448,7 +451,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "direct_io":        False,
         "no_host":          False,
         "cache_prompt":     True,
-        "cache_reuse":      0,
+        "cache_reuse":      1,
         "cache_idle_slots": True,
         "context_shift":    False,
         "slots":            True,
@@ -477,7 +480,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "escape":           True,
         "ui_mcp_proxy":     "on",
         "tools":            "all",
-        "reasoning":        True,
+        "reasoning":        False,
         "reasoning_format": "deepseek",
         "reasoning_budget": 256,
         "reasoning_budget_message": None,
