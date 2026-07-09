@@ -386,12 +386,11 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
     cpu_cores = os.cpu_count() or 4
 
     if cpu_cores <= 4:
-        threads = cpu_cores
+        threads = min(cpu_cores, 8)
     elif cpu_cores <= 8:
-        # 4P+4E or 4C/8T hyperthreaded — use physical core count to avoid SMT contention
-        threads = max(cpu_cores // 2, 4)
+        threads = min(cpu_cores, 16)
     else:
-        threads = min(cpu_cores // 2, 16)
+        threads = min(cpu_cores, 32)
 
     return {
         "host":             "127.0.0.1",
