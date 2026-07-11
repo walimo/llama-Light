@@ -385,13 +385,6 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
     gpu       = detect_gpu()
     cpu_cores = os.cpu_count() or 4
 
-    if cpu_cores <= 4:
-        threads = min(cpu_cores, 8)
-    elif cpu_cores <= 8:
-        threads = min(cpu_cores, 16)
-    else:
-        threads = min(cpu_cores, 32)
-
     return {
         "host":             "127.0.0.1",
         "port":             8080,
@@ -410,10 +403,10 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "flash_attn":       "on",
         "cache_type_k":     "q8_0",
         "cache_type_v":     "q8_0",
-        "threads":          threads,
-        "threads_batch":    threads,
-        "poll":             50,
-        "poll_batch":       50,
+        "threads":          8,
+        "threads_batch":    8,
+        "poll":             0,
+        "poll_batch":       0,
         "prio":             2,
         "prio_batch":       0,
         "cpu_strict":       False,
