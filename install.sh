@@ -315,153 +315,57 @@ fi
 info "Dynamic Core Target: CUDA $CUDA_VERSION (SM$CUDA_ARCH Architecture)"
 
 # -----------------------------------------------------------------------------
-# [5/8] System Toolchain Auditing
+# [5/8] CUDA Toolkit Verification (dynamic — no forced install)
 # -----------------------------------------------------------------------------
-echo -e "\n${BLUE}[5/8]${NC} Verifying Active Toolkit Assets..."
-CURRENT_CUDA=$(nvcc --version 2>/dev/null | grep -oP 'release \K[0-9]+\.[0-9]+' || echo "none")
-echo -e "  Current System CUDA Path: $CURRENT_CUDA"
+echo -e "\n${BLUE}[5/8]${NC} Verifying CUDA Toolkit compatibility..."
 
-NEED_CUDA=0
-if [[ "$CURRENT_CUDA" == "none" ]]; then
-    NEED_CUDA=1
-    info "CUDA not found - will install"
-else
-    # Check if version is sufficient
-    CUDA_MAJOR=$(echo "$CURRENT_CUDA" | cut -d. -f1)
-    NEEDED_MAJOR=$(echo "$CUDA_VERSION" | cut -d. -f1)
-    if [ "$CUDA_MAJOR" -lt "$NEEDED_MAJOR" ]; then
-        info "CUDA $CURRENT_CUDA is older than needed ($CUDA_VERSION) - upgrading"
-        NEED_CUDA=1
-    else
-        success "CUDA $CURRENT_CUDA is sufficient"
-    fi
+# Version comparison helper (matches _llama_downloader.py logic)
+# Parse "13.3" → (13,3), compare tuples
+_version_sufficient() {
+    local current="$1" required="$2"
+    local curr_major curr_minor req_major req_minor
+    curr_major=$(echo "$current" | cut -d. -f1)
+    curr_minor=$(echo "$current" | cut -d. -f2)
+    req_major=$(echo "$required" | cut -d. -f1)
+    req_minor=$(echo "$required" | cut -d. -f2)
+
+    if [ "$curr_major" -gt "$req_major" ]; then return 0; fi
+    if [ "$curr_major" -lt "$req_major" ]; then return 1; fi
+    if [ "$curr_minor" -ge "$req_minor" ]; then return 0; fi
+    return 1
+}
+
+# CUDA_VERSION is already computed by [4/8] based on detected GPU compute cap.
+# Use that directly — no recalculation needed.
+CUDA_REQUIRED="$CUDA_VERSION"
+
+# Check nvcc is available
+if ! command -v nvcc >/dev/null 2>&1; then
+    die "CUDA Toolkit not found (nvcc not in PATH).
+    Install CUDA from: https://developer.nvidia.com/cuda-downloads
+    After installation, ensure /usr/local/cuda/bin is in your PATH."
 fi
 
-# -----------------------------------------------------------------------------
-# [6/8] Dynamic System Provisioning (NVIDIA CUDA Toolkit)
-# -----------------------------------------------------------------------------
-if [ $NEED_CUDA -eq 1 ]; then
-    echo -e "\n${BLUE}[6/8]${NC} Provisioning CUDA $CUDA_VERSION Ecosystem..."
-
-    if [ "$PKG_FAMILY" = "fedora" ]; then
-        # Fedora installation — detect live, try current + 2 previous releases
-        FEDORA_VER="$(rpm -E %fedora 2>/dev/null || echo "")"
-        # If rpm can't determine it, fall back to dnf listing the repo directly
-        if [ -n "$FEDORA_VER" ]; then
-            FEDORA_CANDIDATES=("$FEDORA_VER" "$((FEDORA_VER-1))" "$((FEDORA_VER-2))")
-        else
-            # Try to infer from dnf repolist
-            FEDORA_VER=$(dnf --version 2>/dev/null | head -1 | grep -oP '\d+' | head -1 || echo "44")
-            FEDORA_CANDIDATES=("$FEDORA_VER" "$((FEDORA_VER-1))" "$((FEDORA_VER-2))")
-        fi
-        REPO_ADDED=0
-
-        for FVER in "${FEDORA_CANDIDATES[@]}"; do
-            REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/fedora${FVER}/x86_64/cuda-fedora${FVER}.repo"
-            info "Trying NVIDIA CUDA repo for Fedora ${FVER}..."
-            if curl -fsI "$REPO_URL" >/dev/null 2>&1; then
-                if sudo dnf config-manager addrepo --from-repofile="$REPO_URL" >/dev/null 2>&1; then
-                    REPO_ADDED=1
-                    break
-                fi
-            fi
-        done
-
-        [ "$REPO_ADDED" -eq 1 ] || die "Could not find a working NVIDIA CUDA repo for this Fedora release."
-
-        sudo dnf clean all >/dev/null 2>&1 || true
-
-        # Try to install specific version, or fallback to latest
-        CUDA_PKG_TAG="${CUDA_VERSION//./-}"
-        if dnf list "cuda-toolkit-${CUDA_PKG_TAG}" >/dev/null 2>&1; then
-            PKG_TO_INSTALL="cuda-toolkit-${CUDA_PKG_TAG}"
-        else
-            warn "cuda-toolkit-${CUDA_PKG_TAG} not available - using latest"
-            PKG_TO_INSTALL=$(dnf list --available "cuda-toolkit-*" 2>/dev/null | grep -oP 'cuda-toolkit-\K[0-9]+-[0-9]+' | sort -V | tail -1)
-            [ -n "$PKG_TO_INSTALL" ] || die "No cuda-toolkit packages available"
-            PKG_TO_INSTALL="cuda-toolkit-${PKG_TO_INSTALL}"
-        fi
-
-        info "Deploying compiler assets ($PKG_TO_INSTALL)..."
-        sudo dnf install -y "$PKG_TO_INSTALL" > /dev/null 2>&1 || die "CUDA toolkit installation failed"
-
-        # Extract actual version
-        CUDA_INSTALLED_VERSION=$(echo "$PKG_TO_INSTALL" | sed 's/cuda-toolkit-//' | tr '-' '.')
-        sudo ln -sf "/usr/local/cuda-$CUDA_INSTALLED_VERSION" /usr/local/cuda
-
-    else
-        # Ubuntu/Debian installation — detect codename live from /etc/os-release
-        if [ -f /etc/os-release ]; then
-            . /etc/os-release
-            UBUNTU_CODENAME="${VERSION_CODENAME:-}"
-        fi
-
-        # Map detected codename to NVIDIA repo distro tag
-        case "$UBUNTU_CODENAME" in
-            "noble") UBUNTU_DISTRO="ubuntu2404" ;;
-            "jammy") UBUNTU_DISTRO="ubuntu2204" ;;
-            "focal") UBUNTU_DISTRO="ubuntu2004" ;;
-            "oracular") UBUNTU_DISTRO="ubuntu2510" ;;
-            "lunar") UBUNTU_DISTRO="ubuntu2304" ;;
-            *)
-                # Live detection: query the NVIDIA repo API for available distros
-                # or fall back to ubuntu2404 (latest LTS with repo support)
-                warn "Unknown codename '$UBUNTU_CODENAME' — trying ubuntu2404 (latest LTS)"
-                UBUNTU_DISTRO="ubuntu2404"
-                ;;
-        esac
-
-        # If VERSION_CODENAME is empty (Debian), detect from release info
-        if [ -z "$UBUNTU_CODENAME" ] && [ "$OS_ID" = "debian" ]; then
-            # Debian doesn't use codenames like Ubuntu; check for available CUDA repos
-            UBUNTU_DISTRO="debian${VERSION_ID:-12}"
-        fi
-
-        info "synchronizing package databases..."
-        sudo apt-get update -qq
-
-        info "Configuring NVIDIA CUDA repository..."
-        KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/${UBUNTU_DISTRO}/x86_64/cuda-keyring_1.1-1_all.deb"
-
-        # Try the detected version, probe for availability before downloading
-        if ! wget -q --timeout=30 -O /tmp/cuda-keyring.deb "$KEYRING_URL" 2>/dev/null; then
-            warn "Ubuntu repo '$UBUNTU_DISTRO' not available — probing fallbacks..."
-            # Try other Ubuntu distros in reverse order
-                    for alt_distro in ubuntu2204 ubuntu2004; do
-                        alt_url="https://developer.download.nvidia.com/compute/cuda/repos/${alt_distro}/x86_64/cuda-keyring_1.1-1_all.deb"
-                        if wget -q --timeout=30 -O /tmp/cuda-keyring.deb "$alt_url" 2>/dev/null; then
-                            UBUNTU_DISTRO="$alt_distro"
-                            warn "Using fallback repo: $UBUNTU_DISTRO"
-                            break
-                        fi
-                    done
-            KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/${UBUNTU_DISTRO}/x86_64/cuda-keyring_1.1-1_all.deb"
-            wget -q --timeout=30 -O /tmp/cuda-keyring.deb "$KEYRING_URL" || die "Failed to download CUDA keyring (no available Ubuntu repo found)"
-        fi
-
-        sudo dpkg -i /tmp/cuda-keyring.deb || die "Failed to install CUDA keyring"
-        rm -f /tmp/cuda-keyring.deb
-
-        sudo apt-get update -qq
-
-        CUDA_APT_TAG="${CUDA_VERSION//./-}"
-        info "Deploying compiler assets (cuda-toolkit-${CUDA_APT_TAG})..."
-        sudo apt-get install -y "cuda-toolkit-${CUDA_APT_TAG}" > /dev/null 2>&1 || {
-            warn "cuda-toolkit-${CUDA_APT_TAG} not available - trying latest"
-            sudo apt-get install -y cuda-toolkit > /dev/null 2>&1 || die "CUDA toolkit installation failed"
-        }
-
-        sudo ln -sf "/usr/local/cuda-$CUDA_VERSION" /usr/local/cuda
-    fi
-
-    # Update user environment
-    grep -q "cuda/bin" ~/.bashrc || echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
-    grep -q "cuda/lib64" ~/.bashrc || echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
-
-    success "Toolchain successfully updated to CUDA $CUDA_VERSION"
-else
-    success "Toolchain profile satisfies optimization standard"
+# Parse installed CUDA version
+CUDA_INSTALLED=$(nvcc --version 2>/dev/null | grep -oP 'release \K[0-9]+\.[0-9]+' | head -1)
+if [ -z "$CUDA_INSTALLED" ]; then
+    die "nvcc found but could not parse version. Ensure CUDA Toolkit is properly installed."
 fi
+
+echo -e "  Installed CUDA: $CUDA_INSTALLED"
+echo -e "  Required CUDA:  $CUDA_REQUIRED (for SM${COMPUTE_CAP})"
+
+if _version_sufficient "$CUDA_INSTALLED" "$CUDA_REQUIRED"; then
+    success "CUDA $CUDA_INSTALLED meets requirement ($CUDA_REQUIRED+) for SM${COMPUTE_CAP}"
+else
+    die "CUDA $CUDA_INSTALLED is too old — need $CUDA_REQUIRED or newer for SM${COMPUTE_CAP}.
+    Download latest: https://developer.nvidia.com/cuda-downloads
+    After installing, verify with: nvcc --version"
+fi
+
+# Set build flags for nvcc
+export NVCC_APPEND_FLAGS="${NVCC_APPEND_FLAGS:=-allow-unsupported-compiler}"
+export CMAKE_CUDA_FLAGS="-allow-unsupported-compiler"
 
 # Hard-lock environment
 export CUDACXX="/usr/local/cuda/bin/nvcc"
@@ -617,6 +521,107 @@ else
     warn "systemd --user not available - skipping service setup"
     info "Run manually: llama _run"
 fi
+
+# -----------------------------------------------------------------------------
+# [Service] Ultimate MCP Server Integration
+# -----------------------------------------------------------------------------
+echo -e "\n${BLUE}[Service]${NC} Setting up Ultimate MCP Server..."
+
+MCP_DIR="$HOME/.cache/llama-light/ultimate-mcp"
+MCP_SOURCE="$PWD/llama_light/ultimate_mcp_server.py"
+MCP_DEST="$MCP_DIR/server.py"
+
+if [ -d "$MCP_DIR" ]; then
+    rm -rf "$MCP_DIR"
+fi
+mkdir -p "$MCP_DIR"
+
+if [ -f "$MCP_SOURCE" ]; then
+    cp "$MCP_SOURCE" "$MCP_DEST"
+    success "MCP server copied to $MCP_DIR"
+else
+    warn "MCP server source not found — skipping server copy"
+fi
+
+# Install MCP dependencies in the venv
+info "Installing MCP dependencies (ddgs, beautifulsoup4)..."
+pip install ddgs beautifulsoup4 -q 2>&1 | grep -v "already satisfied"
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    warn "Failed to install MCP dependencies"
+else
+    success "MCP dependencies installed"
+fi
+
+# Install Playwright Chromium browser
+info "Installing Playwright Chromium browser..."
+python -m playwright install chromium 2>&1 | tail -1
+if [ ${PIPESTATUS[0]} -eq 0 ]; then
+    success "Playwright Chromium installed"
+else
+    warn "Playwright Chromium installation failed"
+fi
+
+# Create MCP config file for MCP clients
+MCP_CONFIG_PATH="$HOME/.mcp_config.json"
+cat > "$MCP_CONFIG_PATH" <<EOF
+{
+    "mcpServers": {
+        "ultimate-mcp": {
+            "command": "python",
+            "args": [
+                "$MCP_DEST"
+            ],
+            "env": {}
+        }
+    }
+}
+EOF
+success "MCP config written to $MCP_CONFIG_PATH"
+
+# Create launcher script
+LAUNCHER="$PWD/llama-mcp"
+cat > "$LAUNCHER" <<'EOF'
+#!/bin/bash
+# Ultimate MCP Server launcher
+echo "Starting Ultimate MCP Server..."
+echo "API docs: http://localhost:8000/docs"
+echo "Press Ctrl+C to stop"
+python "$HOME/.cache/llama-light/ultimate-mcp/server.py"
+EOF
+chmod +x "$LAUNCHER"
+success "Launcher created: $LAUNCHER"
+
+# Create systemd service for MCP server
+if command -v systemctl >/dev/null 2>&1 && systemctl --user --version >/dev/null 2>&1; then
+    SVC_DIR="$HOME/.config/systemd/user"
+    SVC_PATH="$SVC_DIR/ultimate-mcp.service"
+    mkdir -p "$SVC_DIR"
+
+    cat > "$SVC_PATH" <<EOF
+[Unit]
+Description=Ultimate MCP Server for llama-light
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=python $MCP_DEST
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+    if systemctl --user daemon-reload && systemctl --user enable ultimate-mcp.service 2>/dev/null; then
+        success "MCP server systemd service installed (not started)"
+        info "Start: systemctl --user start ultimate-mcp.service"
+    fi
+fi
+
+info "MCP Server Info:"
+echo -e "    API docs:  http://localhost:8000/docs"
+echo -e "    Start:     $PWD/llama-mcp"
+echo -e "    Stop:      Ctrl+C or kill the process"
 
 # -----------------------------------------------------------------------------
 # Final instructions
