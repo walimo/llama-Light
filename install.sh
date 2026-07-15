@@ -292,7 +292,7 @@ echo -e "\n${BLUE}[4/8]${NC} Matching Compute Target Matrix..."
 CAP_MAJOR="$(( COMPUTE_CAP / 10 ))"
 
 if [ "$CAP_MAJOR" -ge 12 ]; then
-    CUDA_VERSION="13.3"
+    CUDA_VERSION="13.2"
     CUDA_ARCH="120"
     CUDA_ARCH_LIST="120;110;100;90;89;87;86;80;75"
 elif [ "$CAP_MAJOR" -ge 11 ]; then

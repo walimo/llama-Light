@@ -177,8 +177,10 @@ def get_required_cuda_version(compute_cap: str) -> str:
         cap = 8.9  # Fallback default
     
     # Map compute capability to minimum required CUDA version
+    # nvcc is backward-compatible: a 13.x compiler can build for SM12.0
+    # regardless of minor version. Only major version matters for SM support.
     if cap >= 12.0:
-        return "13.3"   # RTX 50-series (Ada+)
+        return "13.2"   # RTX 50-series (Ada+) — nvcc 13.x sufficient
     elif cap >= 11.0:
         return "12.4"   # RTX 30-series (Ampere)
     elif cap >= 9.0:
