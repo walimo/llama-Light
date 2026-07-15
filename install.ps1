@@ -106,115 +106,176 @@ if ($NVIDIA_SMI) {
 }
 
 if ($GPU_AVAILABLE) {
-    # ── [2/6] CUDA Runtime Library Download ──────────────────────────────
-    # llama.cpp ships CUDA runtime libs separately (cudart + cublas).
-    # We download these to ensure the CUDA binary can find its runtime.
-    Write-Step "Downloading CUDA runtime library (cudart)..."
+    # ── [2/6] CUDA Toolkit Verification ────────────────────────────────
+    # Verify nvcc is available and meets the minimum version for this GPU.
+    # Matches _llama_downloader.py get_required_cuda() mapping:
+    #   SM12+ → 13.3, SM11+ → 12.4, SM9+ → 12.0, SM8+ → 11.8, else → 10.0
+    Write-Step "Verifying CUDA Toolkit..."
 
-    # Select CUDA version based on compute capability
-    $cap_num = [int]$COMPUTE_CAP / 10
-    if ($cap_num -ge 12) {
-        $CUDA_TAG = "13.3"
-    } elseif ($cap_num -ge 8) {
-        $CUDA_TAG = "12.4"
-    } else {
-        $CUDA_TAG = "12.4"  # fallback
+    function Test-VersionSufficient {
+        param([string]$current, [string]$required)
+        $currMajor = ($current -split '\.')[0] -as [int]
+        $currMinor = ($current -split '\.')[1] -as [int]
+        $reqMajor  = ($required -split '\.')[0] -as [int]
+        $reqMinor  = ($required -split '\.')[1] -as [int]
+        if ($currMajor -gt $reqMajor) { return $true }
+        if ($currMajor -lt $reqMajor) { return $false }
+        if ($currMinor -ge $reqMinor) { return $true }
+        return $false
     }
 
-    $CUDA_ASSET = "cudart-llama-bin-win-cuda-$CUDA_TAG-x64.zip"
-    $CACHE_CUDA = "$CACHE_ROOT\cuda\$CUDA_TAG"
+    function Get-RequiredCudaVersion {
+        param([int]$capMajor)
+        if ($capMajor -ge 12) { return "13.3" }
+        elseif ($capMajor -ge 11) { return "12.4" }
+        elseif ($capMajor -ge 9) { return "12.0" }
+        elseif ($capMajor -ge 8) { return "11.8" }
+        else { return "10.0" }
+    }
 
-    if (Test-Path "$CACHE_CUDA\cudart64.dll") {
-        Write-Ok "CUDA runtime cached (cudart-$CUDA_TAG)"
+    $nvccCmd = Get-Command nvcc -ErrorAction SilentlyContinue
+    if (-not $nvccCmd) {
+        Write-Warn "nvcc not found — falling back to CPU-only binary"
+        $CUDA_AVAILABLE = $false
     } else {
-        $RELEASE_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
         try {
-            $RELEASE = Invoke-RestMethod -Uri $RELEASE_URL -Method Get
-            $CUDART_URL = ($RELEASE.assets | Where-Object { $_.name -eq $CUDA_ASSET } | Select-Object -First 1).browser_download_url
-            if (-not $CUDART_URL) {
-                Write-Warn "No cudart asset '$CUDA_ASSET' found in release $LLAMA_CPP_VERSION"
+            $nvccOut = & nvcc --version 2>&1
+            $match = $nvccOut | Select-String 'release (\d+\.\d+)'
+            if ($match) {
+                $CUDA_INSTALLED = $match.Matches[0].Groups[1].Value
+                $capNum = [int]$COMPUTE_CAP / 10
+                $CUDA_REQUIRED = Get-RequiredCudaVersion $capNum
+                Write-Info "Installed CUDA: $CUDA_INSTALLED"
+                Write-Info "Required CUDA:  $CUDA_REQUIRED (for SM$COMPUTE_CAP)"
+                if (Test-VersionSufficient $CUDA_INSTALLED $CUDA_REQUIRED) {
+                    Write-Ok "CUDA $CUDA_INSTALLED meets requirement ($CUDA_REQUIRED+) for SM$COMPUTE_CAP"
+                    $CUDA_AVAILABLE = $true
+                } else {
+                    Write-Warn "CUDA $CUDA_INSTALLED is too old — need $CUDA_REQUIRED+ for SM$COMPUTE_CAP"
+                    Write-Host "  Install CUDA from: https://developer.nvidia.com/cuda-downloads" -ForegroundColor Yellow
+                    Write-Host "  Falling back to CPU-only binary." -ForegroundColor Yellow
+                    $CUDA_AVAILABLE = $false
+                }
             } else {
-                $DL_DIR = "$CACHE_ROOT\_dl"
+                Write-Warn "nvcc found but version could not be parsed — falling back to CPU"
+                $CUDA_AVAILABLE = $false
+            }
+        } catch {
+            Write-Warn "CUDA verification failed: $_ — falling back to CPU"
+            $CUDA_AVAILABLE = $false
+        }
+    }
+
+    if ($CUDA_AVAILABLE) {
+        # ── [2/6] CUDA Runtime Library Download ──────────────────────────
+        # llama.cpp ships CUDA runtime libs separately (cudart + cublas).
+        # We download these to ensure the CUDA binary can find its runtime.
+        Write-Step "Downloading CUDA runtime library (cudart)..."
+
+        # Select CUDA version based on compute capability
+        $cap_num = [int]$COMPUTE_CAP / 10
+        if ($cap_num -ge 12) {
+            $CUDA_TAG = "13.3"
+        } elseif ($cap_num -ge 8) {
+            $CUDA_TAG = "12.4"
+        } else {
+            $CUDA_TAG = "12.4"  # fallback
+        }
+
+        $CUDA_ASSET = "cudart-llama-bin-win-cuda-$CUDA_TAG-x64.zip"
+        $CACHE_CUDA = "$CACHE_ROOT\cuda\$CUDA_TAG"
+
+        if (Test-Path "$CACHE_CUDA\cudart64.dll") {
+            Write-Ok "CUDA runtime cached (cudart-$CUDA_TAG)"
+        } else {
+            $RELEASE_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+            try {
+                $RELEASE = Invoke-RestMethod -Uri $RELEASE_URL -Method Get
+                $CUDART_URL = ($RELEASE.assets | Where-Object { $_.name -eq $CUDA_ASSET } | Select-Object -First 1).browser_download_url
+                if (-not $CUDART_URL) {
+                    Write-Warn "No cudart asset '$CUDA_ASSET' found in release $LLAMA_CPP_VERSION"
+                } else {
+                    $DL_DIR = "$CACHE_ROOT\_dl"
+                    New-Item -ItemType Directory -Force -Path $DL_DIR | Out-Null
+                    $DL_ZIP = "$DL_DIR\cudart.zip"
+                    Write-Info "Downloading cudart ($CUDA_TAG)..."
+                    Invoke-WebRequest -Uri $CUDART_URL -OutFile $DL_ZIP -UseBasicParsing -TimeoutSec 300
+                    New-Item -ItemType Directory -Force -Path $CACHE_CUDA | Out-Null
+                    Expand-Archive -Path $DL_ZIP -DestinationPath $CACHE_CUDA -Force
+                    Remove-Item $DL_ZIP -Force
+                    Remove-Item $DL_DIR -Recurse -Force
+                    Write-Ok "CUDA runtime extracted to $CACHE_CUDA"
+                }
+            } catch {
+                Write-Warn "Failed to download cudart: $_"
+            }
+        }
+
+        # ── [3/6] Download llama-server CUDA binary ──────────────────────
+        Write-Step "Downloading llama.cpp CUDA binary..."
+
+        $BIN_ASSET = "llama-$LLAMA_CPP_VERSION-bin-win-cuda-$CUDA_TAG-x64.zip"
+        $CACHE_BIN = "$CACHE_ROOT\llama-cpp\$LLAMA_CPP_VERSION\sm$COMPUTE_CAP"
+
+        if (Test-Path "$CACHE_BIN\llama-server.exe") {
+            Write-Ok "CUDA binary cached (sm$COMPUTE_CAP)"
+        } else {
+            $RELEASE_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+            try {
+                $RELEASE = Invoke-RestMethod -Uri $RELEASE_URL -Method Get
+                $BIN_URL = ($RELEASE.assets | Where-Object { $_.name -eq $BIN_ASSET } | Select-Object -First 1).browser_download_url
+                if (-not $BIN_URL) {
+                    Write-Warn "No CUDA binary asset '$BIN_ASSET' found — falling back to CPU binary"
+                    $BIN_ASSET = "llama-$LLAMA_CPP_VERSION-bin-win-cpu-x64.zip"
+                    $BIN_URL   = ($RELEASE.assets | Where-Object { $_.name -eq $BIN_ASSET } | Select-Object -First 1).browser_download_url
+                }
+                if (-not $BIN_URL) { Die "No matching binary asset found for $LLAMA_CPP_VERSION" }
+
+                $DL_DIR  = "$CACHE_ROOT\_dl"
                 New-Item -ItemType Directory -Force -Path $DL_DIR | Out-Null
-                $DL_ZIP = "$DL_DIR\cudart.zip"
-                Write-Info "Downloading cudart ($CUDA_TAG)..."
-                Invoke-WebRequest -Uri $CUDART_URL -OutFile $DL_ZIP -UseBasicParsing -TimeoutSec 300
-                New-Item -ItemType Directory -Force -Path $CACHE_CUDA | Out-Null
-                Expand-Archive -Path $DL_ZIP -DestinationPath $CACHE_CUDA -Force
+                $DL_ZIP  = "$DL_DIR\llama-bin.zip"
+                Write-Info "Downloading binary ($BIN_ASSET)..."
+                Invoke-WebRequest -Uri $BIN_URL -OutFile $DL_ZIP -UseBasicParsing -TimeoutSec 300
+                New-Item -ItemType Directory -Force -Path $CACHE_BIN | Out-Null
+                Expand-Archive -Path $DL_ZIP -DestinationPath $CACHE_BIN -Force
                 Remove-Item $DL_ZIP -Force
                 Remove-Item $DL_DIR -Recurse -Force
-                Write-Ok "CUDA runtime extracted to $CACHE_CUDA"
+                Write-Ok "Binary extracted to $CACHE_BIN"
+            } catch {
+                Die "Failed to download binary: $_"
             }
-        } catch {
-            Write-Warn "Failed to download cudart: $_"
         }
-    }
-
-    # ── [3/6] Download llama-server CUDA binary ──────────────────────────
-    Write-Step "Downloading llama.cpp CUDA binary..."
-
-    $BIN_ASSET = "llama-$LLAMA_CPP_VERSION-bin-win-cuda-$CUDA_TAG-x64.zip"
-    $CACHE_BIN = "$CACHE_ROOT\llama-cpp\$LLAMA_CPP_VERSION\sm$COMPUTE_CAP"
-
-    if (Test-Path "$CACHE_BIN\llama-server.exe") {
-        Write-Ok "CUDA binary cached (sm$COMPUTE_CAP)"
     } else {
-        $RELEASE_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
-        try {
-            $RELEASE = Invoke-RestMethod -Uri $RELEASE_URL -Method Get
-            $BIN_URL = ($RELEASE.assets | Where-Object { $_.name -eq $BIN_ASSET } | Select-Object -First 1).browser_download_url
-            if (-not $BIN_URL) {
-                Write-Warn "No CUDA binary asset '$BIN_ASSET' found — falling back to CPU binary"
-                $BIN_ASSET = "llama-$LLAMA_CPP_VERSION-bin-win-cpu-x64.zip"
-                $BIN_URL   = ($RELEASE.assets | Where-Object { $_.name -eq $BIN_ASSET } | Select-Object -First 1).browser_download_url
+        # No CUDA — fall back to CPU binary
+        Write-Step "No NVIDIA GPU detected — downloading CPU-only binary..."
+
+        $BIN_ASSET = "llama-$LLAMA_CPP_VERSION-bin-win-cpu-x64.zip"
+        $CACHE_BIN = "$CACHE_ROOT\llama-cpp\$LLAMA_CPP_VERSION\sm00"
+
+        if (Test-Path "$CACHE_BIN\llama-server.exe") {
+            Write-Ok "CPU binary cached"
+        } else {
+            $RELEASE_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+            try {
+                $RELEASE = Invoke-RestMethod -Uri $RELEASE_URL -Method Get
+                $BIN_URL = ($RELEASE.assets | Where-Object { $_.name -eq $BIN_ASSET } | Select-Object -First 1).browser_download_url
+                if (-not $BIN_URL) { Die "No CPU binary asset '$BIN_ASSET' found" }
+
+                $DL_DIR  = "$CACHE_ROOT\_dl"
+                New-Item -ItemType Directory -Force -Path $DL_DIR | Out-Null
+                $DL_ZIP  = "$DL_DIR\llama-bin.zip"
+                Write-Info "Downloading CPU binary..."
+                Invoke-WebRequest -Uri $BIN_URL -OutFile $DL_ZIP -UseBasicParsing -TimeoutSec 300
+                New-Item -ItemType Directory -Force -Path $CACHE_BIN | Out-Null
+                Expand-Archive -Path $DL_ZIP -DestinationPath $CACHE_BIN -Force
+                Remove-Item $DL_ZIP -Force
+                Remove-Item $DL_DIR -Recurse -Force
+                Write-Ok "CPU binary extracted to $CACHE_BIN"
+            } catch {
+                Die "Failed to download CPU binary: $_"
             }
-            if (-not $BIN_URL) { Die "No matching binary asset found for $LLAMA_CPP_VERSION" }
-
-            $DL_DIR  = "$CACHE_ROOT\_dl"
-            New-Item -ItemType Directory -Force -Path $DL_DIR | Out-Null
-            $DL_ZIP  = "$DL_DIR\llama-bin.zip"
-            Write-Info "Downloading binary ($BIN_ASSET)..."
-            Invoke-WebRequest -Uri $BIN_URL -OutFile $DL_ZIP -UseBasicParsing -TimeoutSec 300
-            New-Item -ItemType Directory -Force -Path $CACHE_BIN | Out-Null
-            Expand-Archive -Path $DL_ZIP -DestinationPath $CACHE_BIN -Force
-            Remove-Item $DL_ZIP -Force
-            Remove-Item $DL_DIR -Recurse -Force
-            Write-Ok "Binary extracted to $CACHE_BIN"
-        } catch {
-            Die "Failed to download binary: $_"
         }
     }
-} else {
-    # No GPU — fall back to CPU binary
-    Write-Step "No NVIDIA GPU detected — downloading CPU-only binary..."
-
-    $BIN_ASSET = "llama-$LLAMA_CPP_VERSION-bin-win-cpu-x64.zip"
-    $CACHE_BIN = "$CACHE_ROOT\llama-cpp\$LLAMA_CPP_VERSION\sm00"
-
-    if (Test-Path "$CACHE_BIN\llama-server.exe") {
-        Write-Ok "CPU binary cached"
-    } else {
-        $RELEASE_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
-        try {
-            $RELEASE = Invoke-RestMethod -Uri $RELEASE_URL -Method Get
-            $BIN_URL = ($RELEASE.assets | Where-Object { $_.name -eq $BIN_ASSET } | Select-Object -First 1).browser_download_url
-            if (-not $BIN_URL) { Die "No CPU binary asset '$BIN_ASSET' found" }
-
-            $DL_DIR  = "$CACHE_ROOT\_dl"
-            New-Item -ItemType Directory -Force -Path $DL_DIR | Out-Null
-            $DL_ZIP  = "$DL_DIR\llama-bin.zip"
-            Write-Info "Downloading CPU binary..."
-            Invoke-WebRequest -Uri $BIN_URL -OutFile $DL_ZIP -UseBasicParsing -TimeoutSec 300
-            New-Item -ItemType Directory -Force -Path $CACHE_BIN | Out-Null
-            Expand-Archive -Path $DL_ZIP -DestinationPath $CACHE_BIN -Force
-            Remove-Item $DL_ZIP -Force
-            Remove-Item $DL_DIR -Recurse -Force
-            Write-Ok "CPU binary extracted to $CACHE_BIN"
-        } catch {
-            Die "Failed to download CPU binary: $_"
-        }
-    }
-}
 
 # ── [4/6] Python virtual environment & pip install ──────────────────────────
 Write-Step "Setting up Python virtual environment..."
