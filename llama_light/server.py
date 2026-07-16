@@ -1,4 +1,3 @@
-# llama_light/server.py
 import json
 import os
 import signal
@@ -131,18 +130,7 @@ def start(
     flash_attn: Optional[bool] = None,
     extra_args: Optional[list] = None,
 ) -> int:
-    """Launch llama-server, reading defaults from config.json.
-
-    All parameters default to None so callers can omit them and have the
-    function read from config.json (which itself falls back to hardware
-    detection in config.py get_defaults()).  _resolve_server_args in _cli.py
-    always passes explicit values, so the None-branch is only for direct
-    API use.
-
-    Server-side tuning (ctx, ngl, threads, etc.) is always read from the
-    config chain (per-model > global config > config.py defaults), not
-    from function parameters — keep the function signature lean.
-    """
+    """Launch llama-server, reading defaults from config.json."""
     ensure_dirs()
 
     bin_path = locate_main_bin()
@@ -156,9 +144,6 @@ def start(
     if not os.path.exists(model_path):
         raise RuntimeError(f"Model not found: {model_path}")
 
-    # Resolve to config values when the caller passes None (direct API use).
-    # When the CLI calls this, _resolve_server_args already supplies explicit
-    # values, so these branches are only taken for programmatic callers.
     from .config import get_config
     cfg = get_config()
     host = host if host is not None else cfg.host
@@ -175,9 +160,6 @@ def start(
             "Run 'llama stop' first."
         )
 
-    # Guard: if the target port is already bound, the child will fail to
-    # start, die immediately, and raise a confusing "process died" error.
-    # Check the port upfront so the user gets a clear message.
     if _detect_port_in_use(host=host, port=port):
         raise RuntimeError(
             f"Port {port} is already in use. "
@@ -186,13 +168,10 @@ def start(
 
     log_file = os.path.join(LOG_DIR, "server.log")
 
-    # per-model settings — auto-detected + user-saved overrides
     from .per_model import get_model_config, _model_name_from_path
     model_name = _model_name_from_path(model_path)
     model_cfg = get_model_config(model_name)
 
-    # Merge: per-model config > global config (config.json > config.py defaults).
-    # The cfg object reads config.json first, then falls back to config.py defaults.
     m_ctx      = model_cfg.get("ctx",    cfg.get("ctx"))
     m_ngl      = model_cfg.get("ngl",    cfg.get("ngl"))
     m_threads  = model_cfg.get("threads", cfg.get("threads"))
@@ -209,7 +188,6 @@ def start(
     m_freq_p   = model_cfg.get("frequency_penalty", cfg.get("frequency_penalty"))
     m_top_k    = model_cfg.get("top_k", cfg.get("top_k"))
 
-    # ── Build command line from config ──────────────────────────────────
     args = [
         bin_path,
         "-m",            model_path,
@@ -228,29 +206,23 @@ def start(
         "--cache-type-v", str(cfg.get("cache_type_v")),
     ]
 
-    # KV offload — default on; flag only needed to disable
     if not cfg.get("kv_offload"):
         args.append("--no-kv-offload")
 
-    # mmap / mlock
     if not cfg.get("mmap"):
         args.append("--no-mmap")
     if cfg.get("mlock"):
         args.append("--mlock")
 
-    # split mode
     if cfg.get("split_mode"):
         args += ["--split-mode", str(cfg.get("split_mode"))]
 
-    # specific device
     if cfg.get("device"):
         args += ["--device", str(cfg.get("device"))]
 
-    # NUMA
     if cfg.get("numa"):
         args += ["--numa", str(cfg.get("numa"))]
 
-    # RoPE
     if cfg.get("rope_scaling"):
         args += ["--rope-scaling", str(cfg.get("rope_scaling"))]
     if cfg.get("rope_freq_base"):
@@ -260,7 +232,6 @@ def start(
     if cfg.get("rope_freq_scale"):
         args += ["--rope-freq-scale", str(cfg.get("rope_freq_scale"))]
 
-    # YaRN (only pass if non-default)
     if cfg.get("yarn_orig_ctx", 0):
         args += ["--yarn-orig-ctx", str(cfg.get("yarn_orig_ctx"))]
     for key, flag in [
@@ -273,22 +244,17 @@ def start(
         if val != -1.0:
             args += [flag, str(val)]
 
-    # MoE
     if cfg.get("cpu_moe"):
         args.append("--cpu-moe")
     if cfg.get("n_cpu_moe"):
         args += ["--n-cpu-moe", str(cfg.get("n_cpu_moe"))]
 
-    # reasoning — controlled by config only:
-    #   config.json reasoning: true  → --reasoning on  + --reasoning-format + --reasoning-budget
-    #   config.json reasoning: false → --reasoning off + --chat-template-kwargs
-    # Priority: per-model > config.json > config.py defaults (via cfg._data pre-seed).
+    # reasoning config
     m_reasoning    = model_cfg.get("reasoning", cfg.get("reasoning"))
     reasoning_on   = m_reasoning is not False and str(m_reasoning).lower() not in ("false", "off", "0")
     m_reason_budget = model_cfg.get("reasoning_budget", cfg.get("reasoning_budget"))
     if not reasoning_on:
         args += ["--reasoning", "off"]
-        args += ["--chat-template-kwargs", '{"thinking":false}']
     elif reasoning_on:
         rf = model_cfg.get("reasoning_format", cfg.get("reasoning_format"))
         if rf and str(rf).lower() not in ("none", "null", ""):
@@ -298,7 +264,6 @@ def start(
         else:
             args += ["--reasoning-budget", "0"]
 
-    # misc flags
     if cfg.get("swa_full"):
         args.append("--swa-full")
     if cfg.get("perf"):
@@ -318,14 +283,11 @@ def start(
     elif cfg.get("ui_mcp_proxy"):
         args += ["--ui-mcp-proxy", str(cfg.get("ui_mcp_proxy"))]
 
-    # generation defaults wired as server-side caps (use model values when set)
     if m_predict != -1:
         args += ["-n", str(m_predict)]
     if m_keep != 0:
         args += ["--keep", str(m_keep)]
 
-    # sampling parameters — wired from config to llama-server
-    # (merged: per-model override > global config > None)
     if m_temp is not None:
         args += ["--temp", str(m_temp)]
     if m_top_p is not None:
@@ -343,7 +305,6 @@ def start(
     if m_top_k is not None:
         args += ["--top-k", str(m_top_k)]
 
-    # ── Additional sampling flags ───────────────────────────────────────
     typical_p = cfg.get("typical_p")
     if typical_p is not None and float(typical_p) != 1.0:
         args += ["--typical-p", str(typical_p)]
@@ -357,7 +318,6 @@ def start(
     if xtc_thresh is not None and float(xtc_thresh) > 0:
         args += ["--xtc-threshold", str(xtc_thresh)]
 
-    # DRY sampling
     dry_mult = cfg.get("dry_multiplier")
     if dry_mult is not None and float(dry_mult) > 0:
         args += ["--dry-multiplier", str(dry_mult)]
@@ -374,7 +334,6 @@ def start(
     if dry_seq:
         args += ["--dry-sequence-breaker", str(dry_seq)]
 
-    # Adaptive / dynamic temperature
     adapt_tgt = cfg.get("adaptive_target")
     if adapt_tgt is not None and float(adapt_tgt) >= 0:
         args += ["--adaptive-target", str(adapt_tgt)]
@@ -388,14 +347,12 @@ def start(
     if dyn_exp is not None and float(dyn_exp) != 1.0:
         args += ["--dynatemp-exp", str(dyn_exp)]
 
-    # Mirostat
     mirostat = cfg.get("mirostat")
     if mirostat is not None and int(mirostat) > 0:
         args += ["--mirostat", str(mirostat)]
         args += ["--mirostat-lr", str(cfg.get("mirostat_lr"))]
         args += ["--mirostat-ent", str(cfg.get("mirostat_ent"))]
 
-    # Speculative decoding
     spec_type = cfg.get("spec_type")
     if spec_type:
         args += ["--spec-type", str(spec_type)]
@@ -412,16 +369,31 @@ def start(
     if spec_p_min is not None and float(spec_p_min) > 0:
         args += ["--spec-draft-p-min", str(spec_p_min)]
 
-    # Chat / template
+    # Chat / template (Consolidated Logic Block)
     chat_kwargs = cfg.get("chat_template_kwargs")
+    if not reasoning_on:
+        if isinstance(chat_kwargs, dict):
+            chat_kwargs = {**chat_kwargs, "thinking": False}
+        elif isinstance(chat_kwargs, str) and chat_kwargs.strip():
+            try:
+                parsed = json.loads(chat_kwargs)
+                if isinstance(parsed, dict):
+                    parsed["thinking"] = False
+                    chat_kwargs = parsed
+            except Exception:
+                pass
+        elif not chat_kwargs:
+            chat_kwargs = {"thinking": False}
+
     if chat_kwargs:
-        args += ["--chat-template-kwargs", str(chat_kwargs)]
+        serialized_kwargs = json.dumps(chat_kwargs) if isinstance(chat_kwargs, (dict, list)) else str(chat_kwargs)
+        args += ["--chat-template-kwargs", serialized_kwargs]
+
     if cfg.get("skip_chat_parsing"):
         args.append("--skip-chat-parsing")
     if not cfg.get("prefill_assistant", True):
         args.append("--no-prefill-assistant")
 
-    # Server features
     if not cfg.get("ui", True):
         args.append("--no-ui")
     if cfg.get("embedding"):
@@ -453,7 +425,6 @@ def start(
     if threads_http is not None and int(threads_http) > 0:
         args += ["--threads-http", str(threads_http)]
 
-    # Fit / memory
     if not cfg.get("fit", True):
         args.append("--no-fit")
     fit_target = cfg.get("fit_target")
@@ -463,10 +434,11 @@ def start(
     if fit_ctx is not None and int(fit_ctx) != 4096:
         args += ["--fit-ctx", str(fit_ctx)]
 
-    # UI / web
+    # UI / web (Safely Serialized)
     ui_config = cfg.get("ui_config")
     if ui_config:
-        args += ["--ui-config", str(ui_config)]
+        serialized_ui = json.dumps(ui_config) if isinstance(ui_config, (dict, list)) else str(ui_config)
+        args += ["--ui-config", serialized_ui]
     path = cfg.get("path")
     if path:
         args += ["--path", str(path)]
@@ -474,7 +446,6 @@ def start(
     if api_prefix:
         args += ["--api-prefix", str(api_prefix)]
 
-    # Logging
     if cfg.get("log_disable"):
         args.append("--log-disable")
     log_file_cli = cfg.get("log_file")
@@ -493,7 +464,6 @@ def start(
     if log_verbosity is not None and int(log_verbosity) != 3:
         args += ["--log-verbosity", str(log_verbosity)]
 
-    # Auth / SSL
     api_key = cfg.get("api_key")
     if api_key:
         args += ["--api-key", str(api_key)]
@@ -507,14 +477,12 @@ def start(
     if ssl_cert:
         args += ["--ssl-cert-file", str(ssl_cert)]
 
-    # Misc
     seed = cfg.get("seed")
     if seed is not None and int(seed) >= 0:
         args += ["--seed", str(seed)]
     if cfg.get("ignore_eos"):
         args.append("--ignore-eos")
 
-    # Samplers / grammar
     samplers = cfg.get("samplers")
     if samplers:
         args += ["--samplers", str(samplers)]
@@ -529,12 +497,12 @@ def start(
         args += ["--grammar-file", str(grammar_file)]
     json_schema = cfg.get("json_schema")
     if json_schema:
-        args += ["--json-schema", str(json_schema)]
+        serialized_schema = json.dumps(json_schema) if isinstance(json_schema, (dict, list)) else str(json_schema)
+        args += ["--json-schema", serialized_schema]
     json_schema_file = cfg.get("json_schema_file")
     if json_schema_file:
         args += ["--json-schema-file", str(json_schema_file)]
 
-    # Model / LoRA
     lora = cfg.get("lora")
     if lora:
         args += ["--lora", str(lora)]
@@ -551,7 +519,6 @@ def start(
     if cv_range:
         args += ["--control-vector-layer-range", str(cv_range)]
 
-    # Media / multimodal
     media_path = cfg.get("media_path")
     if media_path:
         args += ["--media-path", str(media_path)]
@@ -566,7 +533,6 @@ def start(
     if img_max is not None:
         args += ["--image-max-tokens", str(img_max)]
 
-    # Pooling / embeddings
     pooling = cfg.get("pooling")
     if pooling:
         args += ["--pooling", str(pooling)]
@@ -574,18 +540,15 @@ def start(
     if embd_norm is not None and int(embd_norm) != 2:
         args += ["--embd-normalize", str(embd_norm)]
 
-    # Tags
     tags = cfg.get("tags")
     if tags:
         args += ["--tags", str(tags)]
 
-    # Warmup / spm
     if not cfg.get("warmup", True):
         args.append("--no-warmup")
     if cfg.get("spm_infill"):
         args.append("--spm-infill")
 
-    # CPU affinity / priority (add after MoE block)
     if cfg.get("cpu_strict"):
         args.append("--cpu-strict")
     if cfg.get("cpu_strict_batch"):
@@ -599,7 +562,6 @@ def start(
     if cfg.get("poll_batch", 50) != 50:
         args += ["--poll-batch", str(cfg.get("poll_batch"))]
 
-    # reasoning budget message (add after reasoning block)
     rb_msg = model_cfg.get("reasoning_budget_message", cfg.get("reasoning_budget_message"))
     if rb_msg:
         args += ["--reasoning-budget-message", str(rb_msg)]
@@ -614,10 +576,7 @@ def start(
     print(f"  ngl   : {m_ngl}")
     print(f"  log   : {log_file}")
 
-    # Graceful shutdown — clean up on SIGTERM/SIGINT while we're still
-    # polling for health.  Unregistered (SIG_DFL) once the server is up
-    # so the caller can do its own cleanup without being interrupted.
-    proc_ref = [None]  # mutable container so _shutdown can access proc after Popen
+    proc_ref = [None]
 
     def _shutdown(sig, frame):
         print(f"\n[start] shutting down (signal {sig})", end="", flush=True)
@@ -629,10 +588,6 @@ def start(
         print(" done")
         raise SystemExit(0)
 
-    # Launch the child, install signals, then cleanup the handler on success.
-    # Installing signals *after* Popen avoids the narrow window where
-    # SIGTERM arrives before the handler is registered — the child simply
-    # terminates with its default handler (the systemd or init process reaps it).
     with open(log_file, "a") as log:
         proc = subprocess.Popen(
             args,
@@ -645,7 +600,6 @@ def start(
     signal.signal(signal.SIGINT, _shutdown)
 
     def _cleanup():
-        """Unregister signal handlers so start() can return safely."""
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -706,12 +660,7 @@ def stop() -> None:
 
 
 def kill() -> None:
-    """Force-kill the server via systemd (SIGKILL).
-
-    Sends SIGKILL directly to the process (not systemctl stop) so it dies
-    immediately.  Because the unit file no longer has Restart= on-failure,
-    systemd will not auto-restart the service.
-    """
+    """Force-kill the server via systemd (SIGKILL)."""
     if not _systemd_unit_exists():
         print("[kill] systemd service not installed — server may still be running")
         return
@@ -727,9 +676,7 @@ def kill() -> None:
 
 
 def restart(*_args, **_kwargs) -> None:
-    """Restart the server via systemd. Stops the running process and starts
-    a fresh one, which re-reads ~/.config/llama_light/config.json — so
-    'llama config set <key> <value>' then 'llama restart' applies changes."""
+    """Restart the server via systemd."""
     if not _systemd_unit_exists():
         print("[restart] systemd service not installed — cannot restart")
         return
@@ -763,19 +710,6 @@ def restart(*_args, **_kwargs) -> None:
 
 # ── ps ────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 def ps() -> None:
     state = _read_state()
     pid   = state.get("pid")
@@ -793,7 +727,6 @@ def ps() -> None:
     from .config import get_config
     cfg = get_config()
 
-    # Static Values
     model_name = state.get("model_filename", "?")
     port = state.get("port", "?")
     ctx_val = props.get("context_length", state.get("ctx", cfg.ctx))
@@ -802,9 +735,6 @@ def ps() -> None:
     threads_val = props.get("n_threads", state.get("threads", cfg.threads))
     flash_val = props.get("flash_attn", "yes" if cfg.flash_attn != "off" else "no")
 
-    # Helper: Fetch Live Hardware Stats
-
-    # Get live stats once
     gpu_data = {"used_mi": 0, "total_mi": 0, "temp": 0, "pwr": 0, "util": 0}
     try:
         r = subprocess.run(
@@ -915,13 +845,9 @@ def logs(n: int = 40) -> None:
         print(line, end="")
 
 
+# ── chat_messages ─────────────────────────────────────────────────────────────
 
-
-# ── chat_messages (OpenAI-compatible, disables thinking via message format) ───
-
-# Sentinel for "not provided — fall back to config.json".
 _CHAT_NOT_SET = object()
-
 
 def chat_messages(
     messages: list,
@@ -929,19 +855,12 @@ def chat_messages(
     top_k: int = _CHAT_NOT_SET,
     max_tokens: int = _CHAT_NOT_SET,
     stream: bool = True,
-    # Token-efficient params — pass through to llama-server
     top_p: float = _CHAT_NOT_SET,
     min_p: float = _CHAT_NOT_SET,
     frequency_penalty: float = _CHAT_NOT_SET,
     presence_penalty: float = _CHAT_NOT_SET,
 ) -> "Iterator[str]":
-    """
-    POST /v1/chat/completions with a proper messages array.
-
-    When a parameter is not provided, defaults are read from config.json
-    (falling back to config.py get_defaults()) so the generation params
-    stay in a single source of truth.
-    """
+    """POST /v1/chat/completions with a proper messages array."""
     from .config import get_config
     state = _read_state()
     pid   = state.get("pid")
@@ -951,9 +870,6 @@ def chat_messages(
     host = state.get("host", LLAMA_HOST)
     port = state.get("port", LLAMA_PORT)
 
-    # Resolve params: explicit arg > config.json > config.py defaults.
-    # _CHAT_NOT_SET means the caller did not provide the arg, so we read
-    # from the canonical config source.
     cfg = get_config()
     if temperature is _CHAT_NOT_SET:
         temperature = cfg.get("temperature")
@@ -1019,15 +935,10 @@ def _service_path() -> str:
     return os.path.expanduser("~/.config/systemd/user/llama-server.service")
 
 def install_service() -> None:
-    """Install a systemd user service that runs the server (via the internal
-    `llama _run` launcher). All server config is read from
-    ~/.config/llama_light/config.json at startup.
-    To change settings: llama config set <key> <value>, then llama restart.
-    """
+    """Install a systemd user service that runs the server."""
     import shutil as _shutil
     llama_bin = _shutil.which("llama") or f"{sys.executable} -m llama_light"
 
-    # Detect CUDA path — /usr/local/cuda is a symlink created by install.sh
     cuda_path = "/usr/local/cuda/lib64"
     if not os.path.exists(cuda_path):
         for alt in ["/usr/local/cuda-12/lib64", "/usr/local/cuda-11/lib64"]:
@@ -1067,8 +978,6 @@ def install_service() -> None:
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"systemctl command failed: {e}") from e
 
-    # Allow the service to keep running after the user logs out / closes
-    # the terminal (otherwise systemd --user is torn down on logout).
     try:
         subprocess.run(
             ["loginctl", "enable-linger", os.environ.get("USER", "")],

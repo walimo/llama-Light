@@ -36,7 +36,7 @@ _INT_KEYS = {
     "spec_draft_p_split", "spec_draft_p_min",
     "poll", "poll_batch", "prio", "prio_batch",
     "threads_http", "sse_ping_interval",
-    "cache_reuse", "fit_ctx",
+    "cache_reuse", "fit_ctx", "fit_target",
     "image_min_tokens", "image_max_tokens",
     "embd_normalize",
     "log_verbosity",
@@ -62,7 +62,7 @@ _BOOL_KEYS = {
     "models_autoload",
     "warmup", "spm_infill", "mmproj_auto", "mmproj_offload",
     "cache_idle_slots", "context_shift",
-    "cpu_strict", "cpu_strict_batch",
+    "cpu_strict", "cpu_strict_batch", "fit",
 }
 
 # Keys where "none" is a valid string (not a null sentinel)
@@ -478,7 +478,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
         "reasoning_format": "deepseek",
         "reasoning_budget": 256,
         "reasoning_budget_message": None,
-        "chat_template_kwargs": None,
+        "chat_template_kwargs": {"thinking": False},
         "skip_chat_parsing":  False,
         "prefill_assistant":  True,
         "spec_type":          None,
