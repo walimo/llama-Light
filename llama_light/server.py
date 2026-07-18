@@ -18,6 +18,32 @@ from .config import (
 from ._bincheck import locate_main_bin
 
 
+def _find_mmproj(model_path: str) -> Optional[str]:
+    """Look for a co-located mmproj-*.gguf file next to the model."""
+    model_dir = os.path.dirname(model_path)
+    if not os.path.isdir(model_dir):
+        return None
+    candidates = [
+        f for f in os.listdir(model_dir)
+        if f.lower().startswith("mmproj") and f.lower().endswith(".gguf")
+    ]
+    if not candidates:
+        return None
+
+    def _rank(name: str) -> int:
+        n = name.lower()
+        if "f16" in n and "bf16" not in n:
+            return 0
+        if "bf16" in n:
+            return 1
+        if "f32" in n:
+            return 2
+        return 3
+
+    candidates.sort(key=_rank)
+    return os.path.join(model_dir, candidates[0])
+
+
 # ── State ─────────────────────────────────────────────────────────────────────
 
 def _read_state() -> Dict[str, Any]:
@@ -522,10 +548,13 @@ def start(
     media_path = cfg.get("media_path")
     if media_path:
         args += ["--media-path", str(media_path)]
-    if not cfg.get("mmproj_auto", True):
-        args.append("--no-mmproj-auto")
-    if not cfg.get("mmproj_offload", True):
-        args.append("--no-mmproj-offload")
+    mmproj_path = cfg.get("mmproj_path")
+    if not mmproj_path and cfg.get("mmproj_auto", True):
+        mmproj_path = _find_mmproj(model_path)
+    if mmproj_path:
+        args += ["--mmproj", str(mmproj_path)]
+        if not cfg.get("mmproj_offload", True):
+            args.append("--no-mmproj-offload")
     img_min = cfg.get("image_min_tokens")
     if img_min is not None:
         args += ["--image-min-tokens", str(img_min)]
