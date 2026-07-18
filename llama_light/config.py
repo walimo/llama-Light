@@ -516,7 +516,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "offline":          False,
          "log_prefix":       False,
          "log_timestamps":   False,
-         "log_verbosity":    3,
+         "log_verbosity":    0,  # 0=generic (low noise)
          "api_key":          None,
          "api_key_file":     None,
          "ssl_key_file":     None,
