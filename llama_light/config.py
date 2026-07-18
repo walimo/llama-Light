@@ -116,7 +116,7 @@ _CONFIG_SECTIONS: Dict[str, list] = {
         ("parallel", "Number of server slots / concurrent requests"),
     ],
     "── GPU ────────────────────────────────────────": [
-        ("ngl", "Number of layers to offload to GPU (99 = all)"),
+        ("ngl", "Number of layers to offload to GPU (96 recommended for RTX 5060 Ti)"),
         ("split_mode", "How to split across GPUs: layer, row, tensor, none"),
         ("kv_offload", "Offload KV cache to CPU if GPU memory is full"),
         ("repack", "Repack weights for faster GPU inference"),
@@ -398,7 +398,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "batch_size":       3072,
          "ubatch_size":      512,
          "parallel":         1,
-         "ngl":              99 if gpu != "cpu" else 0,
+         "ngl":              96 if gpu != "cpu" else 0,
          "split_mode":       "layer",
          "device":           None,
          "override_tensor":  None,

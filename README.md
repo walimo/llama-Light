@@ -211,7 +211,7 @@ The systemd service is auto-created by `install.sh`. It:
 - Has `KillMode=control-group` for clean shutdown
 - Has `Restart=no` (no auto-restart)
 - Has `TimeoutStartSec=300` for model loading
-- Has `KillSignal=SIGKILL`
+- Has `KillSignal=SIGTERM`
 
 To change settings: `llama config set <key> <value>` then `llama restart`.
 

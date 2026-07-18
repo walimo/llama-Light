@@ -497,9 +497,10 @@ ExecStart=$HOME/.local/bin/llama _run
 PIDFile=$HOME/.cache/llama_light/server.pid
 KillMode=control-group
 KillSignal=SIGTERM
-TimeoutStopSec=5
+TimeoutStopSec=30
 TimeoutStartSec=300
 Restart=no
+LimitMEMLOCK=infinity
 Environment=PATH=$HOME/.local/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin
 Environment=LD_LIBRARY_PATH=/usr/local/cuda/lib64
 Environment=NVCC_APPEND_FLAGS=-allow-unsupported-compiler
