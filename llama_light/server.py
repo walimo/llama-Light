@@ -455,7 +455,7 @@ def start(
         args.append("--no-slots")
     slot_save = cfg.get("slot_save_path")
     if slot_save:
-        args += ["--slot-save-path", str(slot_save)]
+        args += ["--slot-save-path", os.path.expanduser(str(slot_save))]
     if cfg.get("metrics"):
         args.append("--metrics")
     if cfg.get("props"):
@@ -492,7 +492,7 @@ def start(
         args.append("--log-disable")
     log_file_cli = cfg.get("log_file")
     if log_file_cli:
-        args += ["--log-file", str(log_file_cli)]
+        args += ["--log-file", os.path.expanduser(str(log_file_cli))]
     log_colors = cfg.get("log_colors")
     if log_colors and str(log_colors).lower() not in ("auto", "none", ""):
         args += ["--log-colors", str(log_colors)]
@@ -536,39 +536,39 @@ def start(
         args += ["--grammar", str(grammar)]
     grammar_file = cfg.get("grammar_file")
     if grammar_file:
-        args += ["--grammar-file", str(grammar_file)]
+        args += ["--grammar-file", os.path.expanduser(str(grammar_file))]
     json_schema = cfg.get("json_schema")
     if json_schema:
         serialized_schema = json.dumps(json_schema) if isinstance(json_schema, (dict, list)) else str(json_schema)
         args += ["--json-schema", serialized_schema]
     json_schema_file = cfg.get("json_schema_file")
     if json_schema_file:
-        args += ["--json-schema-file", str(json_schema_file)]
+        args += ["--json-schema-file", os.path.expanduser(str(json_schema_file))]
 
     lora = cfg.get("lora")
     if lora:
-        args += ["--lora", str(lora)]
+        args += ["--lora", os.path.expanduser(str(lora))]
     lora_scaled = cfg.get("lora_scaled")
     if lora_scaled:
-        args += ["--lora-scaled", str(lora_scaled)]
+        args += ["--lora-scaled", os.path.expanduser(str(lora_scaled))]
     cv = cfg.get("control_vector")
     if cv:
-        args += ["--control-vector", str(cv)]
+        args += ["--control-vector", os.path.expanduser(str(cv))]
     cv_scaled = cfg.get("control_vector_scaled")
     if cv_scaled:
-        args += ["--control-vector-scaled", str(cv_scaled)]
+        args += ["--control-vector-scaled", os.path.expanduser(str(cv_scaled))]
     cv_range = cfg.get("control_vector_layer_range")
     if cv_range:
         args += ["--control-vector-layer-range", str(cv_range)]
 
     media_path = cfg.get("media_path")
     if media_path:
-        args += ["--media-path", str(media_path)]
+        args += ["--media-path", os.path.expanduser(str(media_path))]
     mmproj_path = cfg.get("mmproj_path")
     if not mmproj_path and cfg.get("mmproj_auto", True):
         mmproj_path = _find_mmproj(model_path)
     if mmproj_path:
-        args += ["--mmproj", str(mmproj_path)]
+        args += ["--mmproj", os.path.expanduser(str(mmproj_path))]
         if not cfg.get("mmproj_offload", True):
             args.append("--no-mmproj-offload")
     img_min = cfg.get("image_min_tokens")
