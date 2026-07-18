@@ -112,7 +112,7 @@
   "offline": false,
   "log_prefix": false,
   "log_timestamps": false,
-  "log_verbosity": 3,
+  "log_verbosity": 0,
   "api_key": null,
   "api_key_file": null,
   "ssl_key_file": null,
