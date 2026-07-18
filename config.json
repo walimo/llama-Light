@@ -130,7 +130,7 @@
   "control_vector": null,
   "control_vector_scaled": null,
   "control_vector_layer_range": null,
-  "media_path": "/home/wali/.cache/llama_light/models",
+  "media_path": "~/.cache/llama_light/models",
   "mmproj_auto": true,
   "mmproj_offload": true,
   "image_min_tokens": null,
