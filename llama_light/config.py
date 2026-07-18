@@ -534,8 +534,8 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "control_vector":   None,
          "control_vector_scaled": None,
          "control_vector_layer_range": None,
-         "media_path":       "~/.cache/llama_light/models",  # auto-detects user home
-         "mmproj_auto":      True,  # vision: False (text-only default)
+         "media_path":       None,  # MUST be null — set to models dir causes conflict with --mmproj
+           "mmproj_auto":      False,
          "mmproj_offload":   True,
          "image_min_tokens": None,
          "image_max_tokens": None,
