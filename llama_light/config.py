@@ -534,8 +534,8 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "control_vector":   None,
          "control_vector_scaled": None,
          "control_vector_layer_range": None,
-         "media_path":       None,
-         "mmproj_auto":      False,  # vision: True
+         "media_path":       "/home/wali/.cache/llama_light/models",
+         "mmproj_auto":      True,  # vision: False (text-only default)
          "mmproj_offload":   True,
          "image_min_tokens": None,
          "image_max_tokens": None,
