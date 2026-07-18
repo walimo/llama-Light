@@ -394,7 +394,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "port":             8080,
          "default_model":    "Qwen3.6-35B-A3B-UD-IQ3_S.gguf",
          "last_model":       "/home/wali/.cache/llama_light/models/Qwen3.6-35B-A3B-UD-IQ3_S.gguf",
-         "ctx":              150000,
+         "ctx":              150000,  # vision: 150000 (same)
          "batch_size":       4096,
          "ubatch_size":      1024,
          "parallel":         1,
@@ -442,8 +442,8 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "mirostat":         0,
          "mirostat_lr":      0.1,
          "mirostat_ent":     5.0,
-         "mlock":            False,
-          "mmap":             False,
+         "mlock":            True,  # vision: False
+         "mmap":             False,
          "direct_io":        True,
          "no_host":          False,
          "cache_prompt":     True,
@@ -517,7 +517,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "control_vector_scaled": None,
          "control_vector_layer_range": None,
          "media_path":       None,
-         "mmproj_auto":      True,
+         "mmproj_auto":      False,  # vision: True
          "mmproj_offload":   True,
          "image_min_tokens": None,
          "image_max_tokens": None,
