@@ -96,19 +96,19 @@ def _base_url() -> str:
 def _health(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
     """Check single /health endpoint (2s timeout)."""
     try:
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=2) as r:
+        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=5) as r:
             return r.status == 200
     except Exception:
         return False
 
 
 def _is_healthy(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
-    """Return True only if both /health and /props return successfully (3s each)."""
+    """Return True only if both /health and /props return successfully (8s each)."""
     try:
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=3) as r:
+        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=8) as r:
             if r.status != 200:
                 return False
-        with urllib.request.urlopen(f"http://{host}:{port}/props", timeout=3) as r:
+        with urllib.request.urlopen(f"http://{host}:{port}/props", timeout=8) as r:
             if r.status != 200:
                 return False
         return True
@@ -936,7 +936,7 @@ def chat_messages(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=600) as resp:
             for raw_line in resp:
                 line = raw_line.decode().strip()
                 if not line or not line.startswith("data:"):
