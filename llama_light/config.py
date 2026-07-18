@@ -411,7 +411,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "last_model":       "/home/wali/.cache/llama_light/models/Qwen3.6-35B-A3B-UD-IQ3_S.gguf",
          "ctx":              100000,  # vision: 100000 (same)
          "batch_size":       2048,
-         "ubatch_size":      1024,
+         "ubatch_size":      512,
          "parallel":         1,
          "ngl":              99 if gpu != "cpu" else 0,
          "split_mode":       "layer",
