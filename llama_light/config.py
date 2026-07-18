@@ -315,7 +315,7 @@ GLOBAL_CONFIG    = os.path.join(CONFIG_DIR, "config.json")
 # ── Env overrides ─────────────────────────────────────────────────────────────
 DEFAULT_HOST       = "127.0.0.1"
 DEFAULT_PORT       = 8080
-DEFAULT_CTX        = 150000
+DEFAULT_CTX        = 100000
 DEFAULT_GPU_LAYERS = 99
 _LLAMA_HOST_val = os.environ.get("LLAMA_HOST")
 LLAMA_HOST   = _LLAMA_HOST_val if _LLAMA_HOST_val else DEFAULT_HOST
@@ -394,7 +394,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "port":             8080,
          "default_model":    "Qwen3.6-35B-A3B-UD-IQ3_S.gguf",
          "last_model":       "/home/wali/.cache/llama_light/models/Qwen3.6-35B-A3B-UD-IQ3_S.gguf",
-         "ctx":              150000,  # vision: 150000 (same)
+         "ctx":              100000,  # vision: 100000 (same)
          "batch_size":       4096,
          "ubatch_size":      1024,
          "parallel":         1,
