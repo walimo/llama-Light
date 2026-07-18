@@ -81,6 +81,7 @@ def _banner() -> None:
     print(cmd("config set --model",   "Set a per-model override (persists per model name)"))
     print(cmd("config backup",        "Snapshot current config.json (10-file rotation)"))
     print(cmd("config restore",       "Restore config from a snapshot  [--path / --latest]"))
+    print(cmd("config reset",        "Reset config.json to config.py defaults"))
     print(cmd("config list-backups",  "List all available config snapshots"))
 
     print(section("◈", "LLAMA.CPP TOOLS"))
@@ -984,6 +985,13 @@ def cmd_config_restore(args):
     print("[restore] complete — restart server to apply")
 
 
+def cmd_config_reset(_args):
+    """Reset config.json to config.py defaults."""
+    from .config import get_config, get_defaults
+    cfg = get_config()
+    cfg.reset()
+    print(f"[reset] config.json restored to {len(get_defaults())} defaults — restart server to apply")
+
 
 def cmd_webui(args):
     """Open llama.cpp's built-in web UI in browser."""
@@ -1335,6 +1343,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_restore.add_argument('--latest', action='store_true', default=False)
     p_restore.add_argument('--path', default=None)
     p_restore.set_defaults(func=cmd_config_restore)
+    cfg_sub.add_parser('reset', help='Reset config.json to config.py defaults').set_defaults(func=cmd_config_reset)
     cfg_sub.add_parser('list-backups').set_defaults(func=cmd_config_list_backups)
     p_set = cfg_sub.add_parser('set')
     p_set.add_argument('key', nargs='?', help='Config key (run: llama config set --keys)')
