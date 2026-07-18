@@ -292,6 +292,12 @@ def start(
 
     if cfg.get("swa_full"):
         args.append("--swa-full")
+    if cfg.get("swa_decay") is not None and float(cfg.get("swa_decay")) != 0.9:
+        args += ["--swa-decay", str(cfg.get("swa_decay"))]
+    if cfg.get("swa_ctx"):
+        args += ["--swa-ctx", str(cfg.get("swa_ctx"))]
+    if cfg.get("swa_target"):
+        args += ["--swa-target", str(cfg.get("swa_target"))]
     if cfg.get("perf"):
         args.append("--perf")
     if not cfg.get("escape"):
@@ -431,6 +437,16 @@ def start(
     cache_reuse = cfg.get("cache_reuse")
     if cache_reuse is not None and int(cache_reuse) > 0:
         args += ["--cache-reuse", str(cache_reuse)]
+    cache_ram = cfg.get("cache_ram")
+    if cache_ram is not None and int(cache_ram) > 0:
+        args += ["--cache-ram", str(cache_ram)]
+    if cfg.get("kv_unified"):
+        args.append("--kv-unified")
+    else:
+        args.append("--no-kv-unified")
+    defrag = cfg.get("defrag_thold")
+    if defrag is not None and int(defrag) > 0:
+        args += ["--defrag-thold", str(defrag)]
     if cfg.get("cache_idle_slots"):
         args.append("--cache-idle-slots")
     if cfg.get("context_shift"):
@@ -575,6 +591,10 @@ def start(
 
     if not cfg.get("warmup", True):
         args.append("--no-warmup")
+    elif cfg.get("no_warmup"):
+        args.append("--no-warmup")
+    if not cfg.get("cont_batching", True):
+        args.append("--no-cont-batching")
     if cfg.get("spm_infill"):
         args.append("--spm-infill")
 

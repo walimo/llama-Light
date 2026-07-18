@@ -41,6 +41,11 @@ _INT_KEYS = {
     "embd_normalize",
     "log_verbosity",
     "port",
+    # Newly added
+    "cache_ram",        # Max cache RAM size in MiB for prompt caching
+    "swa_ctx",          # SWA context size in tokens
+    "swa_target",       # SWA target context size
+    "defrag_thold",     # KV cache defragmentation threshold
 }
 
 # Keys that must be float when set
@@ -49,6 +54,7 @@ _FLOAT_KEYS = {
     "presence_penalty", "rope_freq_base", "rope_scale", "rope_freq_scale",
     "yarn_ext_factor", "yarn_attn_factor", "yarn_beta_slow", "yarn_beta_fast",
     "typical_p",
+    "swa_decay",          # SWA decay rate for adaptive context window
 }
 
 # Keys that must be bool when set
@@ -63,6 +69,9 @@ _BOOL_KEYS = {
     "warmup", "spm_infill", "mmproj_auto", "mmproj_offload",
     "cache_idle_slots", "context_shift",
     "cpu_strict", "cpu_strict_batch", "fit",
+    "kv_unified",     # Unified KV buffer across slots
+    "no_warmup",      # Skip warmup run
+    "cont_batching",  # Continuous/dynamic batching
 }
 
 # Keys where "none" is a valid string (not a null sentinel)
@@ -89,10 +98,10 @@ _VALID_KEYS = set(_INT_KEYS) | set(_FLOAT_KEYS) | set(_BOOL_KEYS) | _STRING_NONE
     "grammar", "grammar_file", "json_schema", "json_schema_file",
     "lora", "lora_scaled", "control_vector", "control_vector_scaled",
     "control_vector_layer_range",
-    "embedding", "rerank",
     "slot_save_path", "media_path",
-    "tags",
-    "active_profile",
+     "tags",
+     "active_profile",
+     "cache_type_k_draft", "cache_type_v_draft",
 }
 
 # ── Section headings and key descriptions ────────────────────────────────────
@@ -116,7 +125,7 @@ _CONFIG_SECTIONS: Dict[str, list] = {
         ("parallel", "Number of server slots / concurrent requests"),
     ],
     "── GPU ────────────────────────────────────────": [
-        ("ngl", "Number of layers to offload to GPU (96 recommended for RTX 5060 Ti)"),
+        ("ngl", "Number of layers to offload to GPU (99=max for single GPU)"),
         ("split_mode", "How to split across GPUs: layer, row, tensor, none"),
         ("kv_offload", "Offload KV cache to CPU if GPU memory is full"),
         ("repack", "Repack weights for faster GPU inference"),
@@ -125,6 +134,7 @@ _CONFIG_SECTIONS: Dict[str, list] = {
         ("flash_attn", "Use FlashAttention: on, off, auto"),
         ("cache_type_k", "KV cache type for K tensor: f32, f16, q8_0, etc."),
         ("cache_type_v", "KV cache type for V tensor: f32, f16, q8_0, etc."),
+        ("kv_unified", "Use single unified KV buffer across all slots"),
     ],
     "── THREADING / CPU ───────────────────────────": [
         ("threads", "Number of CPU threads for generation"),
@@ -184,6 +194,14 @@ _CONFIG_SECTIONS: Dict[str, list] = {
         ("context_shift", "Use context shift on infinite generation"),
         ("slots", "Expose slot monitoring endpoint"),
         ("slot_save_path", "Path to save slot KV cache"),
+        ("cache_ram", "Max RAM for prompt cache in MiB (default: 8192)"),
+        ("defrag_thold", "KV cache defragmentation threshold (0=disabled)"),
+        ("no_warmup", "Skip warmup run at startup"),
+        ("cont_batching", "Enable continuous/dynamic batching"),
+        ("swa_full", "Use full-size SWA cache (better long-context quality)"),
+        ("swa_decay", "SWA decay rate (0-1, lower=slower decay)"),
+        ("swa_ctx", "SWA context size in tokens"),
+        ("swa_target", "SWA target context size"),
     ],
     "── ROPE ──────────────────────────────────────": [
         ("rope_scaling", "RoPE frequency scaling: none, linear, yarn"),
@@ -294,9 +312,6 @@ _CONFIG_SECTIONS: Dict[str, list] = {
     "── MISCELLANEOUS ─────────────────────────────": [
         ("seed", "RNG seed (-1=random)"),
         ("ignore_eos", "Ignore end-of-sequence token and keep generating"),
-        ("swa_full", "Use full-size SWA (sliding window attention) cache"),
-        ("perf", "Enable internal libllama performance timings"),
-        ("escape", "Process escape sequences like \\n, \\r, \\t"),
     ],
 }
 
@@ -395,7 +410,7 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "default_model":    "Qwen3.6-35B-A3B-UD-IQ3_S.gguf",
          "last_model":       "/home/wali/.cache/llama_light/models/Qwen3.6-35B-A3B-UD-IQ3_S.gguf",
          "ctx":              100000,  # vision: 100000 (same)
-         "batch_size":       4096,
+         "batch_size":       2048,
          "ubatch_size":      1024,
          "parallel":         1,
          "ngl":              99 if gpu != "cpu" else 0,
@@ -472,6 +487,9 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "n_cpu_moe":        0,
          "numa":             None,
          "swa_full":         False,
+         "swa_decay":        0.9,
+         "swa_ctx":          None,
+         "swa_target":       None,
          "perf":             False,
          "escape":           True,
          "ui_mcp_proxy":     "on",
@@ -526,6 +544,14 @@ def get_defaults(model_path: Optional[str] = None) -> Dict[str, Any]:
          "tags":             None,
          "active_profile":   "default",
          "tool_calling":     True,
+         # Newly added defaults
+         "kv_unified":       True,
+         "cache_ram":        8192,
+         "defrag_thold":     None,
+         "no_warmup":        False,
+         "cont_batching":    True,
+         "cache_type_k_draft": None,
+         "cache_type_v_draft": None,
      }
 
 
