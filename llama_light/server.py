@@ -884,9 +884,12 @@ def status() -> None:
 # ── logs ──────────────────────────────────────────────────────────────────────
 
 def logs(n: int = 40) -> None:
-    log = _read_state().get("log", os.path.join(LOG_DIR, "server.log"))
+    # Always read from the canonical log path, not the state file (which can be stale)
+    log = os.path.join(LOG_DIR, "server.log")
     if not os.path.exists(log):
         print(f"[logs] not found: {log}")
+        print("  Run 'llama start' to generate the log file, or use:")
+        print(f"  journalctl --user -u llama-server.service -n {n}")
         return
     with open(log) as f:
         lines = f.readlines()[-n:]
@@ -1007,9 +1010,10 @@ def install_service() -> None:
         "KillSignal=SIGTERM",
         "TimeoutStopSec=5",
         "TimeoutStartSec=300",
-        "Environment=PATH=" + os.path.expanduser("~/.local/bin")
-            + ":/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
+        f"Environment=PATH={os.path.expanduser('~/.local/bin')}:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin",
         f"Environment=LD_LIBRARY_PATH={cuda_path}",
+        f"StandardOutput=append:{LOG_DIR}/server.log",
+        f"StandardError=append:{LOG_DIR}/server.log",
         "",
         "[Install]",
         "WantedBy=default.target",

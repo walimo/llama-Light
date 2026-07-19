@@ -330,8 +330,7 @@ def cmd_run(args):
 def cmd_chat(args):
     if not _ensure_server_or_start(args): return
     system   = getattr(args, "system", None)
-    if system is None:
-        system = _CHAT_SYSTEM
+    # No default persona — let the model respond naturally unless user provides --system
     messages = []
     if system:
         messages.append({"role": "system", "content": system})

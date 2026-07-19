@@ -107,7 +107,7 @@
   "embedding": false,
   "rerank": false,
   "log_disable": false,
-  "log_file": null,
+  "log_file": "/home/wali/.cache/llama_light/logs/server.log",
   "log_colors": "auto",
   "offline": false,
   "log_prefix": false,
